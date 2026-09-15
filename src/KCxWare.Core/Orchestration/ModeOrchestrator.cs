@@ -184,6 +184,7 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
         var safetySkippedServices = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         IReadOnlyList<string> survivingServices = [];
         IReadOnlyList<string> survivingProcesses = [];
+        IReadOnlyList<string> bestEffortSurvivingProcesses = [];
 
         for (var attempt = 1; attempt <= ModePolicy.GamingCleanupAttempts; attempt++)
         {
@@ -216,6 +217,11 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
                 await system.StopProcessAsync(process, cancellationToken: cancellationToken);
             }
 
+            foreach (var process in ModePolicy.GamingBestEffortProcesses)
+            {
+                await system.StopProcessAsync(process, cancellationToken: cancellationToken);
+            }
+
             foreach (var process in ModePolicy.GamingSuppressibleBackgroundProcesses)
             {
                 await system.StopProcessAsync(process, backgroundOnly: true, cancellationToken);
@@ -224,9 +230,11 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
             await system.DelayAsync(ModePolicy.GamingVerificationRetryDelay, cancellationToken);
             survivingServices = await FindSurvivingServicesAsync(safetySkippedServices, cancellationToken);
             survivingProcesses = await FindSurvivingProcessesAsync(cancellationToken);
+            bestEffortSurvivingProcesses = await FindBestEffortSurvivingProcessesAsync(cancellationToken);
             log?.Invoke($"Gaming cleanup verification {attempt}/{ModePolicy.GamingCleanupAttempts}: " +
                 $"surviving services={FormatNames(survivingServices)}; " +
                 $"surviving processes={FormatNames(survivingProcesses)}; " +
+                $"best-effort surviving processes={FormatNames(bestEffortSurvivingProcesses)}; " +
                 $"safety-skipped services={FormatNames(safetySkippedServices)}.");
 
             if (survivingServices.Count == 0 && survivingProcesses.Count == 0)
@@ -234,9 +242,11 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
                 await system.DelayAsync(ModePolicy.GamingCleanVerificationDelay, cancellationToken);
                 survivingServices = await FindSurvivingServicesAsync(safetySkippedServices, cancellationToken);
                 survivingProcesses = await FindSurvivingProcessesAsync(cancellationToken);
+                bestEffortSurvivingProcesses = await FindBestEffortSurvivingProcessesAsync(cancellationToken);
                 log?.Invoke($"Gaming cleanup sustained verification {attempt}/{ModePolicy.GamingCleanupAttempts}: " +
                     $"surviving services={FormatNames(survivingServices)}; " +
-                    $"surviving processes={FormatNames(survivingProcesses)}.");
+                    $"surviving processes={FormatNames(survivingProcesses)}; " +
+                    $"best-effort surviving processes={FormatNames(bestEffortSurvivingProcesses)}.");
 
                 if (survivingServices.Count == 0 && survivingProcesses.Count == 0)
                 {
@@ -294,6 +304,21 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
         }
 
         foreach (var process in ModePolicy.GamingShutdownVerifiedProcesses)
+        {
+            if (await system.IsProcessRunningAsync(process, cancellationToken: cancellationToken))
+            {
+                surviving.Add(process);
+            }
+        }
+
+        return surviving;
+    }
+
+    private async Task<IReadOnlyList<string>> FindBestEffortSurvivingProcessesAsync(
+        CancellationToken cancellationToken)
+    {
+        var surviving = new List<string>();
+        foreach (var process in ModePolicy.GamingBestEffortProcesses)
         {
             if (await system.IsProcessRunningAsync(process, cancellationToken: cancellationToken))
             {

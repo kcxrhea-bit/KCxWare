@@ -8,7 +8,7 @@ public static class ModePolicy
     public const string TransitionTaskName = "KCxWare Apply Armed Mode";
     public static readonly TimeSpan GamingSettleDelay = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan GamingVerificationRetryDelay = TimeSpan.FromSeconds(3);
-    public static readonly TimeSpan GamingCleanVerificationDelay = TimeSpan.FromSeconds(15);
+    public static readonly TimeSpan GamingCleanVerificationDelay = TimeSpan.FromSeconds(35);
     public static readonly TimeSpan ServiceStopPollDelay = TimeSpan.FromMilliseconds(250);
     public static readonly TimeSpan ServiceStopTimeout = TimeSpan.FromSeconds(20);
     public const int GamingCleanupAttempts = 3;
@@ -33,10 +33,15 @@ public static class ModePolicy
     [
         "Kudu", "Docker Desktop", "com.docker.backend", "com.docker.build", "ollama", "ollama app", "LM Studio",
         "OneDrive", "OneDrive.Sync.Service", "GoogleDriveFS",
-        "PhoneExperienceHost", "CrossDeviceService", "CrossDeviceResume", "ms-teams", "Teams", "Copilot",
+        "ms-teams", "Teams", "Copilot",
         "SignalRgb", "SignalRgbService", "SignalRgbLauncher", "OpenRGB", "Widgets", "rustdesk",
         "Salad", "Salad.Bootstrapper", "Salad.Bowl.Service", "ReflectUI", "MacriumReflect",
         "SnippingTool"
+    ];
+
+    public static IReadOnlyList<string> GamingBestEffortProcesses { get; } =
+    [
+        "PhoneExperienceHost", "CrossDeviceService", "CrossDeviceResume"
     ];
 
     public static IReadOnlyList<string> GamingSuppressibleBackgroundProcesses { get; } = ["msedge"];
@@ -62,6 +67,7 @@ public static class ModePolicy
         }
 
         var processOverlap = GamingSuppressibleProcesses
+            .Concat(GamingBestEffortProcesses)
             .Concat(GamingSuppressibleBackgroundProcesses)
             .Concat(GamingShutdownVerifiedProcesses)
             .Where(ProtectedProcesses.Contains)

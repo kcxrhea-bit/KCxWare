@@ -19,7 +19,9 @@
 
   <ItemGroup>
     <Resource Include="..\..\assets\KCxWare.ico" Link="Assets\KCxWare.ico" />
-    <Content Include="..\..\assets\1.png" Link="Assets\1.png" CopyToOutputDirectory="PreserveNewest" />
+    <Resource Include="..\..\assets\1.png" Link="Assets\1.png" />
+    <None Include="..\..\assets\1.png" Link="Assets\1.png" TargetPath="Assets\1.png"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

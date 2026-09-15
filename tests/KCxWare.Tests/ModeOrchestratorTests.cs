@@ -92,6 +92,28 @@ public sealed class ModeOrchestratorTests
         Assert.True(system.TaskPresent);
     }
 
+    [Theory]
+    [InlineData("PhoneExperienceHost")]
+    [InlineData("CrossDeviceService")]
+    [InlineData("CrossDeviceResume")]
+    public async Task GamingCleanup_WindowsManagedProcessRespawnIsLoggedBestEffort(string process)
+    {
+        var store = new MemoryStateStore(Armed(MachineMode.GamingArmed, MachineMode.Gaming, []));
+        var system = SystemWithPlans();
+        system.Processes[process] = true;
+        system.ProcessRestartsRemaining[process] = 1;
+        var logs = new List<string>();
+
+        var result = await new ModeOrchestrator(store, system, logs.Add).ApplyArmedAsync();
+
+        Assert.Equal(MachineMode.Gaming, result.CurrentMode);
+        Assert.True(result.Transaction?.Completed);
+        Assert.Contains(process, system.StoppedProcesses);
+        Assert.True(system.Processes[process]);
+        Assert.Contains(logs, message => message.Contains("best-effort surviving processes=") &&
+            message.Contains(process));
+    }
+
     [Fact]
     public async Task GamingCleanup_AllowsWslServiceHostResidualWhenWorkloadIsStopped()
     {
@@ -205,6 +227,7 @@ public sealed class ModeOrchestratorTests
     [InlineData("SaladBowl")]
     [InlineData("WslService")]
     [InlineData("vmcompute")]
+    [InlineData("WSearch")]
     public async Task GamingCleanup_RetriesServiceWhenItRespawnsDuringCleanWindow(string service)
     {
         var store = new MemoryStateStore(Armed(MachineMode.GamingArmed, MachineMode.Gaming, []));
@@ -218,6 +241,14 @@ public sealed class ModeOrchestratorTests
         Assert.Equal(2, system.StoppedServices.Count(name => name.Equals(service,
             StringComparison.OrdinalIgnoreCase)));
         Assert.False(system.Services[service]);
+    }
+
+    [Fact]
+    public void GamingCleanup_CleanWindowCoversObservedWSearchRestartDelayAndRemainsBounded()
+    {
+        Assert.True(ModePolicy.GamingCleanVerificationDelay > TimeSpan.FromSeconds(30));
+        Assert.True(ModePolicy.GamingCleanVerificationDelay <= TimeSpan.FromSeconds(45));
+        Assert.Equal(3, ModePolicy.GamingCleanupAttempts);
     }
 
     [Fact]
@@ -424,6 +455,7 @@ public sealed class ModeOrchestratorTests
         ModePolicy.AssertSafe();
         Assert.DoesNotContain(ModePolicy.GamingSuppressibleServices, ModePolicy.ProtectedServices.Contains);
         Assert.DoesNotContain(ModePolicy.GamingSuppressibleProcesses, ModePolicy.ProtectedProcesses.Contains);
+        Assert.DoesNotContain(ModePolicy.GamingBestEffortProcesses, ModePolicy.ProtectedProcesses.Contains);
         Assert.DoesNotContain(ModePolicy.GamingSuppressibleBackgroundProcesses, ModePolicy.ProtectedProcesses.Contains);
         Assert.DoesNotContain(ModePolicy.GamingShutdownVerifiedProcesses, ModePolicy.ProtectedProcesses.Contains);
     }

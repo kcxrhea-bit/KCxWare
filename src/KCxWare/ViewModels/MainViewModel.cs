@@ -47,7 +47,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
         NotifyStateProperties();
     }
 
-    public void StartElevated(string command)
+    public async Task<int> RunElevatedAsync(string command)
+    {
+        using var process = StartElevatedProcess(command);
+
+        await process.WaitForExitAsync();
+        return process.ExitCode;
+    }
+
+    public void StartElevated(string command) => StartElevatedProcess(command).Dispose();
+
+    private static Process StartElevatedProcess(string command)
     {
         var helperPath = Path.Combine(AppContext.BaseDirectory, "KCxWare.Helper.exe");
         if (!File.Exists(helperPath))
@@ -55,12 +65,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
             throw new FileNotFoundException("KCxWare.Helper.exe is missing. Repair or reinstall KCxWare.", helperPath);
         }
 
-        Process.Start(new ProcessStartInfo(helperPath, command)
+        return Process.Start(new ProcessStartInfo(helperPath, command)
         {
             UseShellExecute = true,
             Verb = "runas",
             WorkingDirectory = AppContext.BaseDirectory
-        });
+        }) ?? throw new InvalidOperationException("KCxWare.Helper.exe could not be started.");
     }
 
     private void NotifyStateProperties()

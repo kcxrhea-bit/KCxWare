@@ -37,8 +37,22 @@ public partial class MainWindow
         RunHelper($"arm {mode} --reboot", true);
     }
 
-    private void RecoverClick(object sender, RoutedEventArgs e) => RunHelper("recover", false);
+    private async void RecoverClick(object sender, RoutedEventArgs e) => await RunRecoveryAsync();
     private void CancelClick(object sender, RoutedEventArgs e) => RunHelper("cancel", false);
+
+    private async Task RunRecoveryAsync()
+    {
+        try
+        {
+            await _viewModel.RunElevatedAsync("recover");
+            await _viewModel.RefreshAsync();
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(exception.Message, "KCxWare", MessageBoxButton.OK, MessageBoxImage.Error);
+            await _viewModel.RefreshAsync();
+        }
+    }
 
     private void RunHelper(string command, bool closeAfterStart)
     {
