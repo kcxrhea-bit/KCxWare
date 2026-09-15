@@ -35,9 +35,89 @@ public sealed class ModeOrchestratorTests
         Assert.Contains("WSearch", system.StoppedServices);
         Assert.Contains("Kudu", system.StoppedProcesses);
         Assert.Equal(1, system.WslShutdownCount);
-        Assert.Equal([ModePolicy.GamingSettleDelay, ModePolicy.GamingVerificationRetryDelay], system.Delays);
+        Assert.Equal([ModePolicy.GamingSettleDelay, ModePolicy.GamingVerificationRetryDelay,
+            ModePolicy.GamingCleanVerificationDelay], system.Delays);
         Assert.Equal(ModePolicy.GamingPowerPlan, system.ActivePlan);
         Assert.False(system.TaskPresent);
+        Assert.Equal(MachineMode.Gaming, result.DesiredMode);
+        Assert.True(result.Transaction?.Completed);
+        Assert.Null(result.Transaction?.Error);
+        Assert.Null(result.LastError);
+    }
+
+    [Fact]
+    public async Task GamingCleanup_LeavesChromeAndNvidiaRecordingProtected()
+    {
+        var store = new MemoryStateStore(Armed(MachineMode.GamingArmed, MachineMode.Gaming, []));
+        var system = SystemWithPlans();
+        system.Processes["chrome"] = true;
+        system.Processes["chrome-native-host"] = true;
+        system.Processes["NVIDIA Overlay"] = true;
+        system.Processes["NVIDIA Share"] = true;
+        system.Processes["PresentMonService"] = true;
+        system.Processes["KCxBrowsers.NativeHost"] = true;
+
+        var result = await new ModeOrchestrator(store, system).ApplyArmedAsync();
+
+        Assert.Equal(MachineMode.Gaming, result.CurrentMode);
+        Assert.True(result.Transaction?.Completed);
+        Assert.DoesNotContain("chrome", system.StoppedProcesses);
+        Assert.DoesNotContain("chrome-native-host", system.StoppedProcesses);
+        Assert.DoesNotContain("NVIDIA Overlay", system.StoppedProcesses);
+        Assert.DoesNotContain("NVIDIA Share", system.StoppedProcesses);
+        Assert.DoesNotContain("PresentMonService", system.StoppedProcesses);
+        Assert.DoesNotContain("KCxBrowsers.NativeHost", system.StoppedProcesses);
+        Assert.All(new[] { "chrome", "chrome-native-host", "NVIDIA Overlay", "NVIDIA Share",
+            "PresentMonService", "KCxBrowsers.NativeHost" },
+            process => Assert.True(system.Processes[process]));
+    }
+
+    [Theory]
+    [InlineData("OpenRGB")]
+    [InlineData("rustdesk")]
+    public async Task GamingCleanup_RequiredProcessSurvivorFailsWithDiagnostic(string process)
+    {
+        var store = new MemoryStateStore(Armed(MachineMode.GamingArmed, MachineMode.Gaming, []));
+        var system = SystemWithPlans();
+        system.TaskPresent = true;
+        system.Processes[process] = true;
+        system.ProcessRestartsRemaining[process] = ModePolicy.GamingCleanupAttempts;
+
+        var result = await new ModeOrchestrator(store, system).ApplyArmedAsync();
+
+        Assert.Equal(MachineMode.RecoveryRequired, result.CurrentMode);
+        Assert.False(result.Transaction?.Completed);
+        Assert.Contains(process, result.Transaction?.Error);
+        Assert.Contains(process, result.LastError);
+        Assert.True(system.TaskPresent);
+    }
+
+    [Fact]
+    public async Task GamingCleanup_AllowsWslServiceHostResidualWhenWorkloadIsStopped()
+    {
+        var store = new MemoryStateStore(Armed(MachineMode.GamingArmed, MachineMode.Gaming, []));
+        var system = SystemWithPlans();
+        system.Processes["wslservice"] = true;
+
+        var result = await new ModeOrchestrator(store, system).ApplyArmedAsync();
+
+        Assert.Equal(MachineMode.Gaming, result.CurrentMode);
+        Assert.True(result.Transaction?.Completed);
+        Assert.True(system.Processes["wslservice"]);
+    }
+
+    [Fact]
+    public async Task GamingCleanup_ActiveWslWorkloadStillFailsVerification()
+    {
+        var store = new MemoryStateStore(Armed(MachineMode.GamingArmed, MachineMode.Gaming, []));
+        var system = SystemWithPlans();
+        system.Processes["vmmemWSL"] = true;
+        system.ProcessRestartsRemaining["vmmemWSL"] = ModePolicy.GamingCleanupAttempts;
+
+        var result = await new ModeOrchestrator(store, system).ApplyArmedAsync();
+
+        Assert.Equal(MachineMode.RecoveryRequired, result.CurrentMode);
+        Assert.Contains("vmmemWSL", result.LastError);
     }
 
     [Fact]
@@ -61,7 +141,7 @@ public sealed class ModeOrchestratorTests
         Assert.DoesNotContain("vmmemWSL", system.StoppedProcesses);
         Assert.Equal(2, system.WslShutdownCount);
         Assert.Equal([ModePolicy.GamingSettleDelay, ModePolicy.GamingVerificationRetryDelay,
-            ModePolicy.GamingVerificationRetryDelay], system.Delays);
+            ModePolicy.GamingVerificationRetryDelay, ModePolicy.GamingCleanVerificationDelay], system.Delays);
         Assert.Contains(logs, message => message.Contains("verification 1/3") && message.Contains("Kudu"));
         Assert.Contains(logs, message => message.Contains("verification 2/3") && message.Contains("surviving processes=none"));
     }
@@ -84,6 +164,103 @@ public sealed class ModeOrchestratorTests
         Assert.True(system.TaskPresent);
         Assert.Equal(ModePolicy.GamingCleanupAttempts, system.WslShutdownCount);
         Assert.Contains(logs, message => message.Contains("verification 3/3") && message.Contains("SaladBowl"));
+    }
+
+    [Fact]
+    public async Task GamingCleanup_StopsSaladServiceBeforeItsProcesses()
+    {
+        var store = new MemoryStateStore(Armed(MachineMode.GamingArmed, MachineMode.Gaming, []));
+        var system = SystemWithPlans();
+        system.Services["SaladBowl"] = true;
+        system.Processes["Salad.Bootstrapper"] = true;
+        system.Processes["Salad.Bowl.Service"] = true;
+
+        var result = await new ModeOrchestrator(store, system).ApplyArmedAsync();
+
+        Assert.Equal(MachineMode.Gaming, result.CurrentMode);
+        var serviceStop = system.Operations.IndexOf("stop-service:SaladBowl");
+        var bootstrapperStop = system.Operations.IndexOf("stop-process:Salad.Bootstrapper");
+        var bowlStop = system.Operations.IndexOf("stop-process:Salad.Bowl.Service");
+        Assert.True(serviceStop >= 0);
+        Assert.True(bootstrapperStop > serviceStop);
+        Assert.True(bowlStop > serviceStop);
+    }
+
+    [Fact]
+    public async Task GamingCleanup_AllowsDcomRespawnedWidgetService()
+    {
+        var store = new MemoryStateStore(Armed(MachineMode.GamingArmed, MachineMode.Gaming, []));
+        var system = SystemWithPlans();
+        system.Processes["WidgetService"] = true;
+
+        var result = await new ModeOrchestrator(store, system).ApplyArmedAsync();
+
+        Assert.Equal(MachineMode.Gaming, result.CurrentMode);
+        Assert.True(result.Transaction?.Completed);
+        Assert.DoesNotContain("WidgetService", system.StoppedProcesses);
+        Assert.True(system.Processes["WidgetService"]);
+    }
+
+    [Theory]
+    [InlineData("SaladBowl")]
+    [InlineData("WslService")]
+    [InlineData("vmcompute")]
+    public async Task GamingCleanup_RetriesServiceWhenItRespawnsDuringCleanWindow(string service)
+    {
+        var store = new MemoryStateStore(Armed(MachineMode.GamingArmed, MachineMode.Gaming, []));
+        var system = SystemWithPlans();
+        system.Services[service] = true;
+        system.ServiceCleanWindowRespawnsRemaining[service] = 1;
+
+        var result = await new ModeOrchestrator(store, system).ApplyArmedAsync();
+
+        Assert.Equal(MachineMode.Gaming, result.CurrentMode);
+        Assert.Equal(2, system.StoppedServices.Count(name => name.Equals(service,
+            StringComparison.OrdinalIgnoreCase)));
+        Assert.False(system.Services[service]);
+    }
+
+    [Fact]
+    public async Task GamingCleanup_ShutsDownWslBeforeStoppingWslAndVmcomputeServices()
+    {
+        var store = new MemoryStateStore(Armed(MachineMode.GamingArmed, MachineMode.Gaming, []));
+        var system = SystemWithPlans();
+        system.Services["WslService"] = true;
+        system.Services["vmcompute"] = true;
+        system.Processes["vmmemWSL"] = true;
+
+        var result = await new ModeOrchestrator(store, system).ApplyArmedAsync();
+
+        Assert.Equal(MachineMode.Gaming, result.CurrentMode);
+        var shutdown = system.Operations.IndexOf("shutdown-wsl");
+        var wslStop = system.Operations.IndexOf("stop-service:WslService");
+        var vmcomputeStop = system.Operations.IndexOf("stop-service:vmcompute");
+        Assert.True(shutdown >= 0);
+        Assert.True(wslStop > shutdown);
+        Assert.True(vmcomputeStop > wslStop);
+        Assert.False(system.Processes["vmmemWSL"]);
+    }
+
+    [Fact]
+    public async Task ArmThenApply_InvokesInlineDelayedWorkerAndDeletesOneShotTaskAfterSustainedSuccess()
+    {
+        var store = new MemoryStateStore();
+        var system = SystemWithPlans();
+        var orchestrator = new ModeOrchestrator(store, system);
+
+        var armed = await orchestrator.ArmAsync(MachineMode.Gaming, TestHelperPath());
+        Assert.Equal(MachineMode.GamingArmed, armed.CurrentMode);
+        Assert.True(system.TaskPresent);
+        Assert.Equal(1, system.TaskArmCount);
+
+        var applied = await orchestrator.ApplyArmedAsync();
+
+        Assert.Equal(MachineMode.Gaming, applied.CurrentMode);
+        Assert.True(applied.Transaction?.Completed);
+        Assert.Equal([ModePolicy.GamingSettleDelay, ModePolicy.GamingVerificationRetryDelay,
+            ModePolicy.GamingCleanVerificationDelay], system.Delays);
+        Assert.False(system.TaskPresent);
+        Assert.Equal(1, system.TaskDeleteCount);
     }
 
     [Fact]
@@ -132,6 +309,45 @@ public sealed class ModeOrchestratorTests
         var result = await orchestrator.ApplyArmedAsync();
         Assert.Equal(MachineMode.Normal, result.CurrentMode);
         Assert.Equal(ModePolicy.WindowsBalancedPowerPlan, system.ActivePlan);
+    }
+
+    [Fact]
+    public async Task GamingToNormal_RestoresSnapshotPowerAndOnlyPreviouslyRunningServices()
+    {
+        const string originalPlan = "11111111-2222-3333-4444-555555555555";
+        var store = new MemoryStateStore();
+        var system = SystemWithPlans();
+        system.Plans.Add(originalPlan);
+        system.ActivePlan = originalPlan;
+        system.Services["WSearch"] = true;
+        system.Services["DoSvc"] = false;
+        system.Processes["chrome"] = true;
+        system.Processes["NVIDIA Overlay"] = true;
+        var orchestrator = new ModeOrchestrator(store, system);
+
+        await orchestrator.ArmAsync(MachineMode.Gaming, TestHelperPath());
+        var gaming = await orchestrator.ApplyArmedAsync();
+        Assert.Equal(MachineMode.Gaming, gaming.CurrentMode);
+        Assert.False(system.Services["WSearch"]);
+
+        await orchestrator.ArmAsync(MachineMode.Normal, TestHelperPath());
+        var normal = await orchestrator.ApplyArmedAsync();
+
+        Assert.Equal(MachineMode.Normal, normal.CurrentMode);
+        Assert.Equal(MachineMode.Normal, normal.DesiredMode);
+        Assert.True(normal.Transaction?.Completed);
+        Assert.Null(normal.Transaction?.Error);
+        Assert.Null(normal.LastError);
+        Assert.Equal(originalPlan, system.ActivePlan);
+        Assert.Contains("WSearch", system.StartedServices);
+        Assert.DoesNotContain("DoSvc", system.StartedServices);
+        Assert.True(system.Processes["chrome"]);
+        Assert.True(system.Processes["NVIDIA Overlay"]);
+        Assert.DoesNotContain("chrome", system.StoppedProcesses);
+        Assert.DoesNotContain("NVIDIA Overlay", system.StoppedProcesses);
+        Assert.Empty(normal.ChangedServices);
+        Assert.Null(normal.PreviousPowerPlan);
+        Assert.False(system.TaskPresent);
     }
 
     [Fact]
@@ -224,6 +440,14 @@ public sealed class ModeOrchestratorTests
             "lghub", "GamingServices", "GamingServicesNet", "EpicGamesLauncher",
             "FortniteClient-Win64-Shipping", "EasyAntiCheat", "EasyAntiCheat_EOS", "BEService" },
             process => Assert.Contains(process, ModePolicy.ProtectedProcesses));
+        Assert.All(new[] { "chrome", "chrome-native-host", "NVIDIA Overlay", "NVIDIA Share",
+            "PresentMonService", "nvsphelper64", "nvfvsdksvc_x64" },
+            process => Assert.Contains(process, ModePolicy.ProtectedProcesses));
+        Assert.All(new[] { "OpenRGB", "rustdesk" },
+            process => Assert.Contains(ModePolicy.GamingSuppressibleProcesses,
+                candidate => candidate.Equals(process, StringComparison.OrdinalIgnoreCase)));
+        Assert.DoesNotContain(ModePolicy.GamingSuppressibleProcesses,
+            process => process.Equals("WidgetService", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -240,6 +464,23 @@ public sealed class ModeOrchestratorTests
     {
         var controller = new WindowsSystemController(new RecordingRunner());
         await Assert.ThrowsAsync<InvalidOperationException>(() => controller.StopProcessAsync("MsMpEng"));
+    }
+
+    [Fact]
+    public async Task ServiceStop_WaitsThroughStopPendingUntilStopped()
+    {
+        var runner = new SequencedRunner(
+            new CommandResult(0, "STATE : 3 STOP_PENDING", string.Empty),
+            new CommandResult(0, "STATE : 3 STOP_PENDING", string.Empty),
+            new CommandResult(0, "STATE : 1 STOPPED", string.Empty));
+        var controller = new WindowsSystemController(runner);
+
+        await controller.StopServiceAsync("SaladBowl");
+
+        Assert.Equal(3, runner.Calls.Count);
+        Assert.Equal(["stop", "SaladBowl"], runner.Calls[0].Arguments);
+        Assert.Equal(["query", "SaladBowl"], runner.Calls[1].Arguments);
+        Assert.Equal(["query", "SaladBowl"], runner.Calls[2].Arguments);
     }
 
     [Fact]

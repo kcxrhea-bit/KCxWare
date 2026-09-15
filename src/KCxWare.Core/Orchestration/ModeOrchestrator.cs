@@ -86,7 +86,7 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
             else
             {
                 await RestoreCapturedServicesAsync(state, cancellationToken);
-                await ApplyNonGamingPowerPlanAsync(target, cancellationToken);
+                await ApplyNonGamingPowerPlanAsync(target, state.PreviousPowerPlan, cancellationToken);
             }
 
             await system.DeleteOneShotTaskAsync(cancellationToken);
@@ -231,7 +231,17 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
 
             if (survivingServices.Count == 0 && survivingProcesses.Count == 0)
             {
-                break;
+                await system.DelayAsync(ModePolicy.GamingCleanVerificationDelay, cancellationToken);
+                survivingServices = await FindSurvivingServicesAsync(safetySkippedServices, cancellationToken);
+                survivingProcesses = await FindSurvivingProcessesAsync(cancellationToken);
+                log?.Invoke($"Gaming cleanup sustained verification {attempt}/{ModePolicy.GamingCleanupAttempts}: " +
+                    $"surviving services={FormatNames(survivingServices)}; " +
+                    $"surviving processes={FormatNames(survivingProcesses)}.");
+
+                if (survivingServices.Count == 0 && survivingProcesses.Count == 0)
+                {
+                    break;
+                }
             }
         }
 
@@ -311,11 +321,14 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
         }
     }
 
-    private async Task ApplyNonGamingPowerPlanAsync(MachineMode target, CancellationToken cancellationToken)
+    private async Task ApplyNonGamingPowerPlanAsync(MachineMode target, string? previousPowerPlan,
+        CancellationToken cancellationToken)
     {
-        var candidates = target == MachineMode.Programming
+        IEnumerable<string> candidates = target == MachineMode.Programming
             ? new[] { ModePolicy.GamingPowerPlan, ModePolicy.AmdBalancedPowerPlan, ModePolicy.WindowsBalancedPowerPlan }
-            : new[] { ModePolicy.AmdBalancedPowerPlan, ModePolicy.WindowsBalancedPowerPlan };
+            : new[] { previousPowerPlan, ModePolicy.AmdBalancedPowerPlan, ModePolicy.WindowsBalancedPowerPlan }
+                .Where(candidate => !string.IsNullOrWhiteSpace(candidate))
+                .Cast<string>();
 
         foreach (var candidate in candidates)
         {

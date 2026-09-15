@@ -8,6 +8,9 @@ public static class ModePolicy
     public const string TransitionTaskName = "KCxWare Apply Armed Mode";
     public static readonly TimeSpan GamingSettleDelay = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan GamingVerificationRetryDelay = TimeSpan.FromSeconds(3);
+    public static readonly TimeSpan GamingCleanVerificationDelay = TimeSpan.FromSeconds(15);
+    public static readonly TimeSpan ServiceStopPollDelay = TimeSpan.FromMilliseconds(250);
+    public static readonly TimeSpan ServiceStopTimeout = TimeSpan.FromSeconds(20);
     public const int GamingCleanupAttempts = 3;
 
     public static IReadOnlySet<string> ProtectedServices { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -31,13 +34,12 @@ public static class ModePolicy
         "Kudu", "Docker Desktop", "com.docker.backend", "com.docker.build", "ollama", "ollama app", "LM Studio",
         "OneDrive", "OneDrive.Sync.Service", "GoogleDriveFS",
         "PhoneExperienceHost", "CrossDeviceService", "CrossDeviceResume", "ms-teams", "Teams", "Copilot",
-        "SignalRgb", "SignalRgbService", "SignalRgbLauncher", "OpenRGB", "Widgets", "WidgetService", "rustdesk",
+        "SignalRgb", "SignalRgbService", "SignalRgbLauncher", "OpenRGB", "Widgets", "rustdesk",
         "Salad", "Salad.Bootstrapper", "Salad.Bowl.Service", "ReflectUI", "MacriumReflect",
-        "NVIDIA Share", "NVIDIA Overlay", "PresentMon", "PresentMon_x64", "nvsphelper64", "nvrla",
-        "nvfvsdksvc_x64", "FrameView", "SnippingTool"
+        "SnippingTool"
     ];
 
-    public static IReadOnlyList<string> GamingSuppressibleBackgroundProcesses { get; } = ["chrome", "msedge"];
+    public static IReadOnlyList<string> GamingSuppressibleBackgroundProcesses { get; } = ["msedge"];
     public static IReadOnlyList<string> GamingShutdownVerifiedProcesses { get; } = ["vmmemWSL"];
 
     public static IReadOnlySet<string> ProtectedProcesses { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -46,7 +48,9 @@ public static class ModePolicy
         "svchost", "audiodg", "WavesSvc64", "NVDisplay.Container", "nvcontainer", "lghub", "lghub_agent",
         "lghub_updater", "GamingServices", "GamingServicesNet", "GameInputSvc", "EpicGamesLauncher",
         "FortniteClient-Win64-Shipping", "FortniteClient-Win64-Shipping_BE",
-        "FortniteClient-Win64-Shipping_EAC", "EasyAntiCheat", "EasyAntiCheat_EOS", "BEService"
+        "FortniteClient-Win64-Shipping_EAC", "EasyAntiCheat", "EasyAntiCheat_EOS", "BEService",
+        "chrome", "chrome-native-host", "NVIDIA Share", "NVIDIA Overlay", "PresentMon", "PresentMon_x64",
+        "PresentMonService", "nvsphelper64", "nvrla", "nvfvsdksvc_x64", "FrameView"
     };
 
     public static void AssertSafe()

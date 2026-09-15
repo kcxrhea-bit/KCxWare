@@ -63,9 +63,22 @@ public sealed partial class WindowsSystemController(ICommandRunner runner) : ISy
     {
         EnsureNotProtected(name);
         var result = await runner.RunAsync("sc.exe", ["stop", name], cancellationToken);
-        if (result.ExitCode != 1062)
+        if (result.ExitCode == 1062)
         {
-            EnsureSuccess(result, $"stop service {name}");
+            return;
+        }
+
+        EnsureSuccess(result, $"stop service {name}");
+        var stopWait = Stopwatch.StartNew();
+        while (await IsServiceRunningAsync(name, cancellationToken) == true)
+        {
+            if (stopWait.Elapsed >= ModePolicy.ServiceStopTimeout)
+            {
+                throw new InvalidOperationException(
+                    $"Service {name} did not reach STOPPED within {ModePolicy.ServiceStopTimeout.TotalSeconds:0} seconds.");
+            }
+
+            await Task.Delay(ModePolicy.ServiceStopPollDelay, cancellationToken);
         }
     }
 

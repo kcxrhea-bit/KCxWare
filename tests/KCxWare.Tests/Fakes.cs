@@ -1,5 +1,6 @@
 using KCxWare.Core.Abstractions;
 using KCxWare.Core.Models;
+using KCxWare.Core.Policies;
 using KCxWare.Core.Windows;
 
 namespace KCxWare.Tests;
@@ -36,6 +37,19 @@ internal sealed class RecordingRunner : ICommandRunner
     }
 }
 
+internal sealed class SequencedRunner(params CommandResult[] results) : ICommandRunner
+{
+    private readonly Queue<CommandResult> _results = new(results);
+    public List<(string FileName, IReadOnlyList<string> Arguments)> Calls { get; } = [];
+
+    public Task<CommandResult> RunAsync(string fileName, IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add((fileName, arguments));
+        return Task.FromResult(_results.Dequeue());
+    }
+}
+
 internal sealed class FakeSystem : ISystemController
 {
     public Dictionary<string, bool> Services { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -43,10 +57,13 @@ internal sealed class FakeSystem : ISystemController
     public Dictionary<string, bool> ServiceCanStopSafely { get; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, bool> Processes { get; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, int> ProcessRestartsRemaining { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, int> ServiceCleanWindowRespawnsRemaining { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, int> ProcessCleanWindowRespawnsRemaining { get; } = new(StringComparer.OrdinalIgnoreCase);
     public HashSet<string> Plans { get; } = new(StringComparer.OrdinalIgnoreCase);
     public List<string> StoppedServices { get; } = [];
     public List<string> StartedServices { get; } = [];
     public List<string> StoppedProcesses { get; } = [];
+    public List<string> Operations { get; } = [];
     public List<TimeSpan> Delays { get; } = [];
     public string? ActivePlan { get; set; } = "existing-plan";
     public bool TaskPresent { get; set; }
@@ -65,6 +82,7 @@ internal sealed class FakeSystem : ISystemController
     {
         Services[name] = false;
         StoppedServices.Add(name);
+        Operations.Add($"stop-service:{name}");
         if (ServiceRestartsRemaining.TryGetValue(name, out var restarts) && restarts > 0)
         {
             ServiceRestartsRemaining[name] = restarts - 1;
@@ -80,6 +98,7 @@ internal sealed class FakeSystem : ISystemController
     {
         Processes[name] = false;
         StoppedProcesses.Add(name);
+        Operations.Add($"stop-process:{name}");
         if (ProcessRestartsRemaining.TryGetValue(name, out var restarts) && restarts > 0)
         {
             ProcessRestartsRemaining[name] = restarts - 1;
@@ -90,6 +109,7 @@ internal sealed class FakeSystem : ISystemController
     public Task ShutdownWslAsync(CancellationToken cancellationToken = default)
     {
         WslShutdownCount++;
+        Operations.Add("shutdown-wsl");
         if (Processes.TryGetValue("vmmemWSL", out var running) && running)
         {
             Processes["vmmemWSL"] = false;
@@ -101,8 +121,32 @@ internal sealed class FakeSystem : ISystemController
         }
         return Task.CompletedTask;
     }
-    public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken = default) { Delays.Add(delay); return Task.CompletedTask; }
+    public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken = default)
+    {
+        Delays.Add(delay);
+        if (delay == ModePolicy.GamingCleanVerificationDelay)
+        {
+            Respawn(ServiceCleanWindowRespawnsRemaining, Services);
+            Respawn(ProcessCleanWindowRespawnsRemaining, Processes);
+        }
+
+        return Task.CompletedTask;
+    }
     public Task ArmOneShotTaskAsync(string helperPath, CancellationToken cancellationToken = default) { TaskPresent = true; TaskArmCount++; return Task.CompletedTask; }
     public Task<bool> IsOneShotTaskPresentAsync(CancellationToken cancellationToken = default) => Task.FromResult(TaskPresent);
     public Task DeleteOneShotTaskAsync(CancellationToken cancellationToken = default) { TaskPresent = false; TaskDeleteCount++; return Task.CompletedTask; }
+
+    private static void Respawn(Dictionary<string, int> remainingByName, Dictionary<string, bool> states)
+    {
+        foreach (var name in remainingByName.Keys.ToArray())
+        {
+            if (remainingByName[name] <= 0)
+            {
+                continue;
+            }
+
+            remainingByName[name]--;
+            states[name] = true;
+        }
+    }
 }
