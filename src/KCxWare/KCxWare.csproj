@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\KCxWare.Core\KCxWare.Core.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <ApplicationIcon>..\..\assets\KCxWare.ico</ApplicationIcon>
+    <AssemblyName>KCxWare</AssemblyName>
+    <RootNamespace>KCxWare</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="..\..\assets\KCxWare.ico" Link="Assets\KCxWare.ico" />
+    <Content Include="..\..\assets\1.png" Link="Assets\1.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

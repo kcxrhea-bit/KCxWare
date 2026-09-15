@@ -1,0 +1,14 @@
+.vs/
+.idea/
+bin/
+obj/
+publish/
+TestResults/
+*.user
+*.suo
+*.log
+logs/
+state.json
+state.json.bak
+state.json.tmp
+*.runtime.json

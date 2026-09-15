@@ -1,0 +1,123 @@
+﻿<Window x:Class="KCxWare.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:KCxWare"
+        mc:Ignorable="d"
+        Title="KCxWare · PC Mode Control" Icon="Assets/KCxWare.ico"
+        Width="1120" Height="780" MinWidth="920" MinHeight="660"
+        WindowStartupLocation="CenterScreen" Background="#05070A">
+    <Grid>
+        <Image Source="Assets/1.png" Stretch="UniformToFill" Opacity="0.42" />
+        <Rectangle Fill="#9205070A" />
+        <Rectangle>
+            <Rectangle.Fill>
+                <RadialGradientBrush Center="0.5,0.42" GradientOrigin="0.5,0.42" RadiusX="0.72" RadiusY="0.75">
+                    <GradientStop Color="#2800E6FF" Offset="0" />
+                    <GradientStop Color="#C905070A" Offset="0.72" />
+                    <GradientStop Color="#F205070A" Offset="1" />
+                </RadialGradientBrush>
+            </Rectangle.Fill>
+        </Rectangle>
+
+        <Grid Margin="34,26">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="K C x W A R E" FontSize="34" FontWeight="Black" />
+                    <TextBlock Text="P C  M O D E  C O N T R O L" Foreground="{StaticResource Cyan}" FontSize="12" FontWeight="Bold" Margin="2,2,0,0" />
+                </StackPanel>
+                <Border Grid.Column="1" Background="#BB0A1018" BorderBrush="{StaticResource Magenta}" BorderThickness="1"
+                        CornerRadius="20" Padding="16,8" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse Width="8" Height="8" Fill="{StaticResource Cyan}" Margin="0,0,9,0" />
+                        <TextBlock Text="{Binding Health}" FontWeight="Bold" FontSize="11" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <TabControl Grid.Row="1" Margin="0,22,0,14" Background="Transparent" BorderThickness="0">
+                <TabControl.Resources>
+                    <Style TargetType="TabItem">
+                        <Setter Property="Foreground" Value="#AFC3D4" /><Setter Property="Background" Value="#990C121A" />
+                        <Setter Property="BorderBrush" Value="#4432DDF5" /><Setter Property="Padding" Value="18,8" />
+                        <Style.Triggers><Trigger Property="IsSelected" Value="True"><Setter Property="Foreground" Value="White" /><Setter Property="Background" Value="#D7162030" /><Setter Property="BorderBrush" Value="{StaticResource Cyan}" /></Trigger></Style.Triggers>
+                    </Style>
+                </TabControl.Resources>
+                <TabItem Header="MODE CONTROL">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Background="#A8080D14">
+                        <StackPanel Margin="26,22">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="C U R R E N T  M O D E" Foreground="#8FA9BC" FontSize="11" FontWeight="Bold" />
+                                    <TextBlock Text="{Binding CurrentMode}" FontSize="29" FontWeight="Black" Margin="0,3,0,0">
+                                        <TextBlock.Foreground><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#20E6FF" /><GradientStop Color="#FF2BD6" Offset="1" /></LinearGradientBrush></TextBlock.Foreground>
+                                    </TextBlock>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                    <Border Style="{StaticResource StatusTile}"><StackPanel><TextBlock Text="POWER PLAN" Foreground="#7590A5" FontSize="9" /><TextBlock Text="{Binding ActivePowerPlan}" FontWeight="SemiBold" MaxWidth="240" TextTrimming="CharacterEllipsis" /></StackPanel></Border>
+                                    <Border Style="{StaticResource StatusTile}"><StackPanel><TextBlock Text="TRANSITION" Foreground="#7590A5" FontSize="9" /><TextBlock Text="{Binding ArmedStatus}" FontWeight="SemiBold" /></StackPanel></Border>
+                                </StackPanel>
+                            </Grid>
+
+                            <Border Visibility="{Binding ShowGamingExit, Converter={StaticResource BoolToVisibility}}" Margin="0,18,0,0" BorderBrush="{StaticResource Magenta}" BorderThickness="1" CornerRadius="8" Background="#C0220B27" Padding="16">
+                                <StackPanel><TextBlock Text="GAMING SESSION ACTIVE" FontWeight="Bold" Foreground="{StaticResource Magenta}" /><TextBlock Text="Return safely without leaving KCxWare running in the gaming session." Foreground="#C9D7E2" Margin="0,3,0,10" /><StackPanel Orientation="Horizontal"><Button Style="{StaticResource NeonButton}" Content="RESTART TO PROGRAMMING MODE" Click="ProgrammingClick" Margin="0,0,10,0" /><Button Style="{StaticResource NeonButton}" Content="RESTART TO NORMAL MODE" Click="NormalClick" /></StackPanel></StackPanel>
+                            </Border>
+
+                            <UniformGrid Columns="3" Margin="-7,20,-7,0">
+                                <Button Style="{StaticResource NeonButton}" Click="GamingClick" Margin="7" HorizontalContentAlignment="Stretch">
+                                    <StackPanel><TextBlock Text="GAMING MODE" FontSize="17" FontWeight="Black" Foreground="{StaticResource Cyan}" /><TextBlock Text="MAXIMUM GAME-FOCUSED PERFORMANCE" FontSize="9" Foreground="#8EDCE6" Margin="0,3,0,15" /><TextBlock Text="Restart into a lean gaming environment while preserving security, networking, audio, graphics, input, and anti-cheat." TextWrapping="Wrap" Foreground="#CBD8E3" LineHeight="19" /></StackPanel>
+                                </Button>
+                                <Button Style="{StaticResource NeonButton}" Click="ProgrammingClick" Margin="7" HorizontalContentAlignment="Stretch">
+                                    <StackPanel><TextBlock Text="PROGRAMMING MODE" FontSize="17" FontWeight="Black" Foreground="#BA8DFF" /><TextBlock Text="FULL DEVELOPMENT ENVIRONMENT" FontSize="9" Foreground="#BFB0D8" Margin="0,3,0,15" /><TextBlock Text="Restore Docker, WSL, local AI, indexing, sync, and development capabilities without auto-launching heavy tools." TextWrapping="Wrap" Foreground="#CBD8E3" LineHeight="19" /></StackPanel>
+                                </Button>
+                                <Button Style="{StaticResource NeonButton}" Click="NormalClick" Margin="7" HorizontalContentAlignment="Stretch">
+                                    <StackPanel><TextBlock Text="NORMAL MODE" FontSize="17" FontWeight="Black" Foreground="{StaticResource Magenta}" /><TextBlock Text="EVERYDAY WINDOWS USE" FontSize="9" Foreground="#E79BD7" Margin="0,3,0,15" /><TextBlock Text="Balanced services, cloud sync, updates, RGB utilities, browsers, and everyday convenience features." TextWrapping="Wrap" Foreground="#CBD8E3" LineHeight="19" /></StackPanel>
+                                </Button>
+                            </UniformGrid>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                                <Button Visibility="{Binding ShowRecovery, Converter={StaticResource BoolToVisibility}}" Style="{StaticResource NeonButton}" Content="RUN SAFE RECOVERY" Click="RecoverClick" Margin="0,0,10,0" />
+                                <Button Visibility="{Binding ShowCancel, Converter={StaticResource BoolToVisibility}}" Style="{StaticResource NeonButton}" Content="CANCEL ARMED TRANSITION" Click="CancelClick" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding ErrorDetail}" Foreground="#9DB0C0" Margin="2,12,0,0" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+                <TabItem Header="OFFLINE GUIDE">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Background="#C4080D14">
+                        <StackPanel Margin="30,24" MaxWidth="900">
+                            <TextBlock Text="KCxWare Guide" FontSize="28" FontWeight="Black" Foreground="{StaticResource Cyan}" />
+                            <TextBlock TextWrapping="Wrap" LineHeight="21" Margin="0,8,0,18" Foreground="#D6E2EC" Text="KCxWare switches this PC between Gaming, Programming, and Normal Everyday profiles. Use it before changing the machine's purpose; every mode transition is armed, elevated through Windows UAC, applied once after logon, and recorded under C:\ProgramData\KCxWare." />
+                            <TextBlock Text="MODES AND WHEN TO USE THEM" FontWeight="Bold" Foreground="{StaticResource Magenta}" />
+                            <TextBlock TextWrapping="Wrap" LineHeight="21" Margin="0,7,0,16" Text="Gaming Mode stops only the supported session workloads listed by KCxWare and selects AMD Ryzen High Performance when installed. It never disables Defender, Firewall, networking, audio, NVIDIA display essentials, Logitech input, game services, or anti-cheat. Programming Mode restores KCxWare-stopped services and prefers an installed high-performance/development plan without launching every tool. Normal Mode restores captured services and prefers AMD Ryzen Balanced, then Windows Balanced." />
+                            <TextBlock Text="SETUP, DEFAULTS, AND PERMISSIONS" FontWeight="Bold" Foreground="{StaticResource Cyan}" />
+                            <TextBlock TextWrapping="Wrap" LineHeight="21" Margin="0,7,0,16" Text="Install with installer\Install-KCxWare.ps1 or run the published folder. The UI stays unelevated. Choosing a mode shows an exact reboot confirmation, then Windows UAC elevates only KCxWare.Helper. Default state is Normal and unknown or missing services are ignored. No secrets are stored. State and transaction recovery data are stored in ProgramData; helper logs contain operation names and errors only." />
+                            <TextBlock Text="RISKS AND RECOVERY" FontWeight="Bold" Foreground="{StaticResource Magenta}" />
+                            <TextBlock TextWrapping="Wrap" LineHeight="21" Margin="0,7,0,16" Text="A confirmed transition restarts Windows and unsaved work may be lost. Gaming suppression can close supported background applications. If UAC is declined, the helper is missing, a power plan is unavailable, or a transition is interrupted, reopen KCxWare. Use Cancel Armed Transition before reboot, or Run Safe Recovery when RECOVERY REQUIRED appears. Recovery restores services recorded as previously running, restores the prior installed power plan when possible, and removes the one-shot scheduled task." />
+                            <TextBlock Text="EXAMPLES AND RELATED FEATURES" FontWeight="Bold" Foreground="{StaticResource Cyan}" />
+                            <TextBlock TextWrapping="Wrap" LineHeight="21" Margin="0,7,0,16" Text="Before Fortnite: save work, choose Gaming Mode, approve the confirmation and UAC, then sign in after restart. After gaming: open KCxWare and choose Restart to Programming Mode or Restart to Normal Mode. Check Current Mode, Power Plan, Transition, reboot status, last transition, and health before acting. The one-shot task removes itself after applying the selected mode; KCxWare does not remain resident." />
+                            <TextBlock Text="TROUBLESHOOTING" FontWeight="Bold" Foreground="{StaticResource Magenta}" />
+                            <TextBlock TextWrapping="Wrap" LineHeight="21" Margin="0,7,0,0" Text="Missing helper: repair or reinstall the published KCxWare folder. UAC declined: no system transition is made; choose the mode again. Missing service: expected and safely skipped. No supported power plan: recovery is required; use Run Safe Recovery and verify Windows power plans. Stale armed task: cancel it in KCxWare or run recovery. Persistent problems: inspect C:\ProgramData\KCxWare\state.json and logs\helper.log without deleting them, then use the installer repair path." />
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+            </TabControl>
+
+            <Grid Grid.Row="2">
+                <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <TextBlock Foreground="#647D91" FontSize="10"><Run Text="LAST TRANSITION  ·  " /><Run Text="{Binding LastTransition, Mode=OneWay}" Foreground="#ABC0D0" /></TextBlock>
+                <TextBlock Grid.Column="1" Foreground="#647D91" FontSize="10"><Run Text="REBOOT  ·  " /><Run Text="{Binding RebootStatus, Mode=OneWay}" Foreground="{StaticResource Magenta}" /></TextBlock>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>
