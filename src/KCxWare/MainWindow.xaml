@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:KCxWare"
+        xmlns:views="clr-namespace:KCxWare.Views"
         mc:Ignorable="d"
         Title="KCxWare · PC Mode Control" Icon="Assets/KCxWare.ico"
         Width="1180" Height="800" MinWidth="960" MinHeight="680" WindowState="Maximized"
@@ -93,20 +94,20 @@
                             </Border>
 
                             <UniformGrid Columns="3" Margin="-8,20,-8,0">
-                                <Button Style="{StaticResource NeonButton}" Click="GamingClick" Margin="8" MinHeight="178" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" BorderBrush="#D620E6FF" Background="#4D06131B">
+                                <Button Style="{StaticResource NeonButton}" Click="GamingClick" IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBoolToBool}}" Margin="8" MinHeight="178" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" BorderBrush="#D620E6FF" Background="#4D06131B">
                                     <StackPanel><TextBlock Text="GAMING MODE" FontSize="17" FontWeight="Black" Foreground="{StaticResource Cyan}" /><TextBlock Text="MAXIMUM GAME-FOCUSED PERFORMANCE" FontSize="9" Foreground="#8EDCE6" Margin="0,3,0,15" /><TextBlock Text="Restart into a lean gaming environment while preserving security, networking, audio, graphics, input, and anti-cheat." TextWrapping="Wrap" Foreground="#CBD8E3" LineHeight="19" /></StackPanel>
                                 </Button>
-                                <Button Style="{StaticResource NeonButton}" Click="ProgrammingClick" Margin="8" MinHeight="178" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" BorderBrush="#D6A86DFF" Background="#4D100B1B">
+                                <Button Style="{StaticResource NeonButton}" Click="ProgrammingClick" IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBoolToBool}}" Margin="8" MinHeight="178" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" BorderBrush="#D6A86DFF" Background="#4D100B1B">
                                     <StackPanel><TextBlock Text="PROGRAMMING MODE" FontSize="17" FontWeight="Black" Foreground="#BA8DFF" /><TextBlock Text="FULL DEVELOPMENT ENVIRONMENT" FontSize="9" Foreground="#BFB0D8" Margin="0,3,0,15" /><TextBlock Text="Restore Docker, WSL, local AI, indexing, sync, and development capabilities without auto-launching heavy tools." TextWrapping="Wrap" Foreground="#CBD8E3" LineHeight="19" /></StackPanel>
                                 </Button>
-                                <Button Style="{StaticResource NeonButton}" Click="NormalClick" Margin="8" MinHeight="178" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" BorderBrush="#D6FF2BD6" Background="#4D190817">
+                                <Button Style="{StaticResource NeonButton}" Click="NormalClick" IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBoolToBool}}" Margin="8" MinHeight="178" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" BorderBrush="#D6FF2BD6" Background="#4D190817">
                                     <StackPanel><TextBlock Text="NORMAL MODE" FontSize="17" FontWeight="Black" Foreground="{StaticResource Magenta}" /><TextBlock Text="EVERYDAY WINDOWS USE" FontSize="9" Foreground="#E79BD7" Margin="0,3,0,15" /><TextBlock Text="Balanced services, cloud sync, updates, RGB utilities, browsers, and everyday convenience features." TextWrapping="Wrap" Foreground="#CBD8E3" LineHeight="19" /></StackPanel>
                                 </Button>
                             </UniformGrid>
 
                             <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
-                                <Button Visibility="{Binding ShowRecovery, Converter={StaticResource BoolToVisibility}}" Style="{StaticResource NeonButton}" Content="RUN SAFE RECOVERY" Click="RecoverClick" Margin="0,0,10,0" />
-                                <Button Visibility="{Binding ShowCancel, Converter={StaticResource BoolToVisibility}}" Style="{StaticResource NeonButton}" Content="CANCEL ARMED TRANSITION" Click="CancelClick" />
+                                <Button Visibility="{Binding ShowRecovery, Converter={StaticResource BoolToVisibility}}" IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBoolToBool}}" Style="{StaticResource NeonButton}" Content="RUN SAFE RECOVERY" Click="RecoverClick" Margin="0,0,10,0" />
+                                <Button Visibility="{Binding ShowCancel, Converter={StaticResource BoolToVisibility}}" IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBoolToBool}}" Style="{StaticResource NeonButton}" Content="CANCEL ARMED TRANSITION" Click="CancelClick" />
                             </StackPanel>
                             <TextBlock Text="{Binding ErrorDetail}" Foreground="#9DB0C0" Margin="2,12,0,0" />
                         </StackPanel>
@@ -146,5 +147,7 @@
             </Grid>
             </Border>
         </Grid>
+
+        <views:LoadingOverlay x:Name="LoadingHost" />
     </Grid>
 </Window>

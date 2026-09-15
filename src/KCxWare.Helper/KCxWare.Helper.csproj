@@ -5,7 +5,10 @@
   </ItemGroup>
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <!-- WinExe: the helper must never show a console window after UAC elevation. It communicates
+         results via its exit code and C:\ProgramData\KCxWare\logs\helper.log, not console I/O, so
+         no output is lost by running without an attached console. -->
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PlatformTarget>x64</PlatformTarget>

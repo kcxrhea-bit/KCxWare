@@ -22,6 +22,11 @@
     <Resource Include="..\..\assets\1.png" Link="Assets\1.png" />
     <None Include="..\..\assets\1.png" Link="Assets\1.png" TargetPath="Assets\1.png"
           CopyToOutputDirectory="PreserveNewest" />
+    <!-- The KCx loading-overlay parade video. Copied beside the executable (not embedded as a
+         WPF pack resource) so the MediaElement can play it directly from disk by path at runtime,
+         in dev, Release publish, and the installer output alike. -->
+    <None Include="..\..\assets\final.mp4" Link="Assets\final.mp4" TargetPath="Assets\final.mp4"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

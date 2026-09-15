@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
+using KCxWare.Core.Loading;
 using KCxWare.Core.Models;
 using KCxWare.Core.Orchestration;
 using KCxWare.Core.Persistence;
@@ -16,8 +17,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private ModeState _state = new();
     private string _activePowerPlan = "Detecting…";
     private string _health = "CHECKING";
+    private bool _isBusy;
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>Central loading coordinator shared by every async operation this window triggers.</summary>
+    public LoadingCoordinator LoadingCoordinator { get; } = new();
 
     public string CurrentMode => FormatMode(_state.CurrentMode);
     public string ActivePowerPlan { get => _activePowerPlan; private set => SetField(ref _activePowerPlan, value); }
@@ -30,18 +35,39 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public bool ShowRecovery => _state.CurrentMode == MachineMode.RecoveryRequired;
     public bool ShowCancel => _state.RebootRequired;
 
+    /// <summary>True while any tracked operation is active. Buttons bind to this to prevent double-submission.</summary>
+    public bool IsBusy
+    {
+        get => _isBusy;
+        private set
+        {
+            if (_isBusy == value) return;
+            _isBusy = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public MainViewModel()
+    {
+        LoadingCoordinator.Changed += () => IsBusy = LoadingCoordinator.Current is not null;
+    }
+
     public async Task RefreshAsync()
     {
+        using var op = LoadingCoordinator.Begin("Loading configuration…", "Reading KCxWare state…", indeterminate: false);
         try
         {
             _state = await _orchestrator.GetStateAsync();
+            op.Update("Reading current power plan…", progress: 60);
             ActivePowerPlan = await new WindowsSystemController(new CommandRunner()).GetActivePowerPlanAsync() ?? "Unavailable";
             Health = _state.CurrentMode == MachineMode.RecoveryRequired ? "RECOVERY REQUIRED" : "HEALTHY";
+            op.Complete("Configuration loaded.");
         }
         catch (Exception exception)
         {
             Health = "STATE UNAVAILABLE";
             _state = _state with { LastError = exception.Message };
+            op.Fail(exception.Message);
         }
 
         NotifyStateProperties();
@@ -59,7 +85,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private static Process StartElevatedProcess(string command)
     {
-        var helperPath = Path.Combine(AppContext.BaseDirectory, "KCxWare.Helper.exe");
+        var helperPath = HelperLocator.ResolveHelperPath(AppContext.BaseDirectory);
         if (!File.Exists(helperPath))
         {
             throw new FileNotFoundException("KCxWare.Helper.exe is missing. Repair or reinstall KCxWare.", helperPath);
@@ -69,6 +95,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             UseShellExecute = true,
             Verb = "runas",
+            WindowStyle = ProcessWindowStyle.Hidden,
             WorkingDirectory = AppContext.BaseDirectory
         }) ?? throw new InvalidOperationException("KCxWare.Helper.exe could not be started.");
     }
