@@ -31,7 +31,32 @@ public sealed partial class WindowsSystemController(ICommandRunner runner) : ISy
         }
 
         EnsureSuccess(result, $"query service {name}");
-        return result.StandardOutput.Contains("RUNNING", StringComparison.OrdinalIgnoreCase);
+        return !result.StandardOutput.Contains("STOPPED", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public async Task<bool> CanStopServiceSafelyAsync(string name, CancellationToken cancellationToken = default)
+    {
+        EnsureNotProtected(name);
+        if (!name.Equals("WinFsp.Launcher", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var result = await runner.RunAsync("sc.exe", ["enumdepend", name], cancellationToken);
+        if (result.ExitCode != 0)
+        {
+            return false;
+        }
+
+        foreach (Match match in ServiceNameRegex().Matches(result.StandardOutput))
+        {
+            if (await IsServiceRunningAsync(match.Groups[1].Value, cancellationToken) == true)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public async Task StopServiceAsync(string name, CancellationToken cancellationToken = default)
@@ -53,10 +78,27 @@ public sealed partial class WindowsSystemController(ICommandRunner runner) : ISy
         }
     }
 
-    public async Task StopProcessAsync(string name, CancellationToken cancellationToken = default)
+    public Task<bool> IsProcessRunningAsync(string name, bool backgroundOnly = false,
+        CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        foreach (var process in Process.GetProcessesByName(name))
+        EnsureNotProtectedProcess(name);
+        var processes = GetTargetProcesses(name, backgroundOnly);
+        var running = processes.Count != 0;
+        foreach (var process in processes)
+        {
+            process.Dispose();
+        }
+
+        return Task.FromResult(running);
+    }
+
+    public async Task StopProcessAsync(string name, bool backgroundOnly = false,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureNotProtectedProcess(name);
+        foreach (var process in GetTargetProcesses(name, backgroundOnly))
         {
             using (process)
             {
@@ -86,8 +128,19 @@ public sealed partial class WindowsSystemController(ICommandRunner runner) : ISy
                 }
             }
         }
-
     }
+
+    public async Task ShutdownWslAsync(CancellationToken cancellationToken = default)
+    {
+        var wslPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "wsl.exe");
+        if (File.Exists(wslPath))
+        {
+            EnsureSuccess(await runner.RunAsync(wslPath, ["--shutdown"], cancellationToken), "shut down WSL");
+        }
+    }
+
+    public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken = default) =>
+        Task.Delay(delay, cancellationToken);
 
     public async Task ArmOneShotTaskAsync(string helperPath, CancellationToken cancellationToken = default)
     {
@@ -125,6 +178,67 @@ public sealed partial class WindowsSystemController(ICommandRunner runner) : ISy
         }
     }
 
+    private static void EnsureNotProtectedProcess(string name)
+    {
+        if (ModePolicy.ProtectedProcesses.Contains(name))
+        {
+            throw new InvalidOperationException($"Refusing to stop protected process {name}.");
+        }
+    }
+
+    private static IReadOnlyList<Process> GetTargetProcesses(string name, bool backgroundOnly)
+    {
+        var processes = Process.GetProcessesByName(name);
+        var activeProcesses = new List<Process>(processes.Length);
+        foreach (var process in processes)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    activeProcesses.Add(process);
+                }
+                else
+                {
+                    process.Dispose();
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                process.Dispose();
+            }
+        }
+
+        if (!backgroundOnly)
+        {
+            return activeProcesses;
+        }
+
+        try
+        {
+            if (activeProcesses.Any(process => process.MainWindowHandle != IntPtr.Zero))
+            {
+                foreach (var process in activeProcesses)
+                {
+                    process.Dispose();
+                }
+
+                return [];
+            }
+
+            return activeProcesses;
+        }
+        catch (InvalidOperationException)
+        {
+            foreach (var process in activeProcesses)
+            {
+                process.Dispose();
+            }
+
+            return [];
+        }
+    }
+
     private static void EnsureSuccess(CommandResult result, string operation)
     {
         if (result.ExitCode != 0)
@@ -136,4 +250,7 @@ public sealed partial class WindowsSystemController(ICommandRunner runner) : ISy
 
     [GeneratedRegex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")]
     private static partial Regex PowerPlanRegex();
+
+    [GeneratedRegex(@"SERVICE_NAME:\s*(\S+)", RegexOptions.IgnoreCase)]
+    private static partial Regex ServiceNameRegex();
 }

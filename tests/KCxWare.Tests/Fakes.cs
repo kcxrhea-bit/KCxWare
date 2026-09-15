@@ -39,23 +39,69 @@ internal sealed class RecordingRunner : ICommandRunner
 internal sealed class FakeSystem : ISystemController
 {
     public Dictionary<string, bool> Services { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, int> ServiceRestartsRemaining { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, bool> ServiceCanStopSafely { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, bool> Processes { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, int> ProcessRestartsRemaining { get; } = new(StringComparer.OrdinalIgnoreCase);
     public HashSet<string> Plans { get; } = new(StringComparer.OrdinalIgnoreCase);
     public List<string> StoppedServices { get; } = [];
     public List<string> StartedServices { get; } = [];
     public List<string> StoppedProcesses { get; } = [];
+    public List<TimeSpan> Delays { get; } = [];
     public string? ActivePlan { get; set; } = "existing-plan";
     public bool TaskPresent { get; set; }
     public int TaskArmCount { get; private set; }
     public int TaskDeleteCount { get; private set; }
+    public int WslShutdownCount { get; private set; }
 
     public Task<string?> GetActivePowerPlanAsync(CancellationToken cancellationToken = default) => Task.FromResult(ActivePlan);
     public Task<bool> PowerPlanExistsAsync(string planId, CancellationToken cancellationToken = default) => Task.FromResult(Plans.Contains(planId));
     public Task SetPowerPlanAsync(string planId, CancellationToken cancellationToken = default) { ActivePlan = planId; return Task.CompletedTask; }
     public Task<bool?> IsServiceRunningAsync(string name, CancellationToken cancellationToken = default) =>
         Task.FromResult(Services.TryGetValue(name, out var running) ? (bool?)running : null);
-    public Task StopServiceAsync(string name, CancellationToken cancellationToken = default) { Services[name] = false; StoppedServices.Add(name); return Task.CompletedTask; }
+    public Task<bool> CanStopServiceSafelyAsync(string name, CancellationToken cancellationToken = default) =>
+        Task.FromResult(!ServiceCanStopSafely.TryGetValue(name, out var safe) || safe);
+    public Task StopServiceAsync(string name, CancellationToken cancellationToken = default)
+    {
+        Services[name] = false;
+        StoppedServices.Add(name);
+        if (ServiceRestartsRemaining.TryGetValue(name, out var restarts) && restarts > 0)
+        {
+            ServiceRestartsRemaining[name] = restarts - 1;
+            Services[name] = true;
+        }
+        return Task.CompletedTask;
+    }
     public Task StartServiceAsync(string name, CancellationToken cancellationToken = default) { Services[name] = true; StartedServices.Add(name); return Task.CompletedTask; }
-    public Task StopProcessAsync(string name, CancellationToken cancellationToken = default) { StoppedProcesses.Add(name); return Task.CompletedTask; }
+    public Task<bool> IsProcessRunningAsync(string name, bool backgroundOnly = false,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Processes.TryGetValue(name, out var running) && running);
+    public Task StopProcessAsync(string name, bool backgroundOnly = false, CancellationToken cancellationToken = default)
+    {
+        Processes[name] = false;
+        StoppedProcesses.Add(name);
+        if (ProcessRestartsRemaining.TryGetValue(name, out var restarts) && restarts > 0)
+        {
+            ProcessRestartsRemaining[name] = restarts - 1;
+            Processes[name] = true;
+        }
+        return Task.CompletedTask;
+    }
+    public Task ShutdownWslAsync(CancellationToken cancellationToken = default)
+    {
+        WslShutdownCount++;
+        if (Processes.TryGetValue("vmmemWSL", out var running) && running)
+        {
+            Processes["vmmemWSL"] = false;
+            if (ProcessRestartsRemaining.TryGetValue("vmmemWSL", out var restarts) && restarts > 0)
+            {
+                ProcessRestartsRemaining["vmmemWSL"] = restarts - 1;
+                Processes["vmmemWSL"] = true;
+            }
+        }
+        return Task.CompletedTask;
+    }
+    public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken = default) { Delays.Add(delay); return Task.CompletedTask; }
     public Task ArmOneShotTaskAsync(string helperPath, CancellationToken cancellationToken = default) { TaskPresent = true; TaskArmCount++; return Task.CompletedTask; }
     public Task<bool> IsOneShotTaskPresentAsync(CancellationToken cancellationToken = default) => Task.FromResult(TaskPresent);
     public Task DeleteOneShotTaskAsync(CancellationToken cancellationToken = default) { TaskPresent = false; TaskDeleteCount++; return Task.CompletedTask; }

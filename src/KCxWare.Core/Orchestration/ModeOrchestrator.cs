@@ -4,7 +4,7 @@ using KCxWare.Core.Policies;
 
 namespace KCxWare.Core.Orchestration;
 
-public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController system)
+public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController system, Action<string>? log = null)
 {
     public Task<ModeState> GetStateAsync(CancellationToken cancellationToken = default) =>
         stateStore.LoadAsync(cancellationToken);
@@ -179,28 +179,125 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
 
     private async Task ApplyGamingAsync(CancellationToken cancellationToken)
     {
-        foreach (var service in ModePolicy.GamingSuppressibleServices)
+        await system.DelayAsync(ModePolicy.GamingSettleDelay, cancellationToken);
+
+        var safetySkippedServices = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        IReadOnlyList<string> survivingServices = [];
+        IReadOnlyList<string> survivingProcesses = [];
+
+        for (var attempt = 1; attempt <= ModePolicy.GamingCleanupAttempts; attempt++)
         {
-            if (ModePolicy.ProtectedServices.Contains(service))
+            await system.ShutdownWslAsync(cancellationToken);
+            safetySkippedServices.Clear();
+
+            foreach (var service in ModePolicy.GamingSuppressibleServices)
             {
-                throw new InvalidOperationException($"Protected service policy violation: {service}");
+                if (ModePolicy.ProtectedServices.Contains(service))
+                {
+                    throw new InvalidOperationException($"Protected service policy violation: {service}");
+                }
+
+                if (await system.IsServiceRunningAsync(service, cancellationToken) != true)
+                {
+                    continue;
+                }
+
+                if (!await system.CanStopServiceSafelyAsync(service, cancellationToken))
+                {
+                    safetySkippedServices.Add(service);
+                    continue;
+                }
+
+                await system.StopServiceAsync(service, cancellationToken);
             }
 
-            if (await system.IsServiceRunningAsync(service, cancellationToken) == true)
+            foreach (var process in ModePolicy.GamingSuppressibleProcesses)
             {
-                await system.StopServiceAsync(service, cancellationToken);
+                await system.StopProcessAsync(process, cancellationToken: cancellationToken);
+            }
+
+            foreach (var process in ModePolicy.GamingSuppressibleBackgroundProcesses)
+            {
+                await system.StopProcessAsync(process, backgroundOnly: true, cancellationToken);
+            }
+
+            await system.DelayAsync(ModePolicy.GamingVerificationRetryDelay, cancellationToken);
+            survivingServices = await FindSurvivingServicesAsync(safetySkippedServices, cancellationToken);
+            survivingProcesses = await FindSurvivingProcessesAsync(cancellationToken);
+            log?.Invoke($"Gaming cleanup verification {attempt}/{ModePolicy.GamingCleanupAttempts}: " +
+                $"surviving services={FormatNames(survivingServices)}; " +
+                $"surviving processes={FormatNames(survivingProcesses)}; " +
+                $"safety-skipped services={FormatNames(safetySkippedServices)}.");
+
+            if (survivingServices.Count == 0 && survivingProcesses.Count == 0)
+            {
+                break;
             }
         }
 
-        foreach (var process in ModePolicy.GamingSuppressibleProcesses)
+        if (survivingServices.Count != 0 || survivingProcesses.Count != 0)
         {
-            await system.StopProcessAsync(process, cancellationToken);
+            throw new InvalidOperationException("Gaming cleanup verification failed. " +
+                $"Surviving services: {FormatNames(survivingServices)}. " +
+                $"Surviving processes: {FormatNames(survivingProcesses)}.");
         }
 
         if (await system.PowerPlanExistsAsync(ModePolicy.GamingPowerPlan, cancellationToken))
         {
             await system.SetPowerPlanAsync(ModePolicy.GamingPowerPlan, cancellationToken);
         }
+    }
+
+    private async Task<IReadOnlyList<string>> FindSurvivingServicesAsync(
+        IReadOnlySet<string> safetySkippedServices, CancellationToken cancellationToken)
+    {
+        var surviving = new List<string>();
+        foreach (var service in ModePolicy.GamingSuppressibleServices)
+        {
+            if (!safetySkippedServices.Contains(service) &&
+                await system.IsServiceRunningAsync(service, cancellationToken) == true)
+            {
+                surviving.Add(service);
+            }
+        }
+
+        return surviving;
+    }
+
+    private async Task<IReadOnlyList<string>> FindSurvivingProcessesAsync(CancellationToken cancellationToken)
+    {
+        var surviving = new List<string>();
+        foreach (var process in ModePolicy.GamingSuppressibleProcesses)
+        {
+            if (await system.IsProcessRunningAsync(process, cancellationToken: cancellationToken))
+            {
+                surviving.Add(process);
+            }
+        }
+
+        foreach (var process in ModePolicy.GamingSuppressibleBackgroundProcesses)
+        {
+            if (await system.IsProcessRunningAsync(process, backgroundOnly: true, cancellationToken))
+            {
+                surviving.Add($"{process} (background)");
+            }
+        }
+
+        foreach (var process in ModePolicy.GamingShutdownVerifiedProcesses)
+        {
+            if (await system.IsProcessRunningAsync(process, cancellationToken: cancellationToken))
+            {
+                surviving.Add(process);
+            }
+        }
+
+        return surviving;
+    }
+
+    private static string FormatNames(IEnumerable<string> names)
+    {
+        var values = names.Order(StringComparer.OrdinalIgnoreCase).ToArray();
+        return values.Length == 0 ? "none" : string.Join(", ", values);
     }
 
     private async Task RestoreCapturedServicesAsync(ModeState state, CancellationToken cancellationToken)

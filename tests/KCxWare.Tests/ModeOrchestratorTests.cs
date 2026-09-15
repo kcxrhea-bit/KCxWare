@@ -29,11 +29,77 @@ public sealed class ModeOrchestratorTests
         var system = SystemWithPlans();
         system.TaskPresent = true;
         system.Services["WSearch"] = true;
+        system.Processes["Kudu"] = true;
         var result = await new ModeOrchestrator(store, system).ApplyArmedAsync();
         Assert.Equal(MachineMode.Gaming, result.CurrentMode);
         Assert.Contains("WSearch", system.StoppedServices);
+        Assert.Contains("Kudu", system.StoppedProcesses);
+        Assert.Equal(1, system.WslShutdownCount);
+        Assert.Equal([ModePolicy.GamingSettleDelay, ModePolicy.GamingVerificationRetryDelay], system.Delays);
         Assert.Equal(ModePolicy.GamingPowerPlan, system.ActivePlan);
         Assert.False(system.TaskPresent);
+    }
+
+    [Fact]
+    public async Task GamingCleanup_RetriesWorkloadsThatRestartBeforeSuccess()
+    {
+        var store = new MemoryStateStore(Armed(MachineMode.GamingArmed, MachineMode.Gaming, []));
+        var system = SystemWithPlans();
+        system.Services["WslService"] = true;
+        system.ServiceRestartsRemaining["WslService"] = 1;
+        system.Processes["Kudu"] = true;
+        system.ProcessRestartsRemaining["Kudu"] = 1;
+        system.Processes["vmmemWSL"] = true;
+        system.ProcessRestartsRemaining["vmmemWSL"] = 1;
+        var logs = new List<string>();
+
+        var result = await new ModeOrchestrator(store, system, logs.Add).ApplyArmedAsync();
+
+        Assert.Equal(MachineMode.Gaming, result.CurrentMode);
+        Assert.Equal(2, system.StoppedServices.Count(name => name == "WslService"));
+        Assert.Equal(2, system.StoppedProcesses.Count(name => name == "Kudu"));
+        Assert.DoesNotContain("vmmemWSL", system.StoppedProcesses);
+        Assert.Equal(2, system.WslShutdownCount);
+        Assert.Equal([ModePolicy.GamingSettleDelay, ModePolicy.GamingVerificationRetryDelay,
+            ModePolicy.GamingVerificationRetryDelay], system.Delays);
+        Assert.Contains(logs, message => message.Contains("verification 1/3") && message.Contains("Kudu"));
+        Assert.Contains(logs, message => message.Contains("verification 2/3") && message.Contains("surviving processes=none"));
+    }
+
+    [Fact]
+    public async Task GamingCleanup_DoesNotCompleteWhenSuppressibleWorkloadSurvivesRetries()
+    {
+        var store = new MemoryStateStore(Armed(MachineMode.GamingArmed, MachineMode.Gaming, []));
+        var system = SystemWithPlans();
+        system.TaskPresent = true;
+        system.Services["SaladBowl"] = true;
+        system.ServiceRestartsRemaining["SaladBowl"] = ModePolicy.GamingCleanupAttempts;
+        var logs = new List<string>();
+
+        var result = await new ModeOrchestrator(store, system, logs.Add).ApplyArmedAsync();
+
+        Assert.Equal(MachineMode.RecoveryRequired, result.CurrentMode);
+        Assert.False(result.Transaction?.Completed);
+        Assert.Contains("SaladBowl", result.LastError);
+        Assert.True(system.TaskPresent);
+        Assert.Equal(ModePolicy.GamingCleanupAttempts, system.WslShutdownCount);
+        Assert.Contains(logs, message => message.Contains("verification 3/3") && message.Contains("SaladBowl"));
+    }
+
+    [Fact]
+    public async Task GamingCleanup_SkipsWinFspWhenAServiceDependencyMakesItUnsafe()
+    {
+        var store = new MemoryStateStore(Armed(MachineMode.GamingArmed, MachineMode.Gaming, []));
+        var system = SystemWithPlans();
+        system.Services["WinFsp.Launcher"] = true;
+        system.ServiceCanStopSafely["WinFsp.Launcher"] = false;
+        var logs = new List<string>();
+
+        var result = await new ModeOrchestrator(store, system, logs.Add).ApplyArmedAsync();
+
+        Assert.Equal(MachineMode.Gaming, result.CurrentMode);
+        Assert.DoesNotContain("WinFsp.Launcher", system.StoppedServices);
+        Assert.Contains(logs, message => message.Contains("safety-skipped services=WinFsp.Launcher"));
     }
 
     [Fact]
@@ -141,6 +207,23 @@ public sealed class ModeOrchestratorTests
     {
         ModePolicy.AssertSafe();
         Assert.DoesNotContain(ModePolicy.GamingSuppressibleServices, ModePolicy.ProtectedServices.Contains);
+        Assert.DoesNotContain(ModePolicy.GamingSuppressibleProcesses, ModePolicy.ProtectedProcesses.Contains);
+        Assert.DoesNotContain(ModePolicy.GamingSuppressibleBackgroundProcesses, ModePolicy.ProtectedProcesses.Contains);
+        Assert.DoesNotContain(ModePolicy.GamingShutdownVerifiedProcesses, ModePolicy.ProtectedProcesses.Contains);
+    }
+
+    [Fact]
+    public void RequiredGamingDependencies_RemainExplicitlyProtected()
+    {
+        Assert.All(new[] { "WinDefend", "mpssvc", "Dhcp", "Dnscache", "WlanSvc", "AudioSrv",
+            "AudioEndpointBuilder", "NVDisplay.ContainerLocalSystem", "NvContainerLocalSystem",
+            "LGHUBUpdaterService", "WavesTBSvc", "GamingServices", "GamingServicesNet", "GameInputSvc",
+            "EasyAntiCheat", "EasyAntiCheat_EOS", "BEService" },
+            service => Assert.Contains(service, ModePolicy.ProtectedServices));
+        Assert.All(new[] { "MsMpEng", "explorer", "dwm", "audiodg", "NVDisplay.Container", "nvcontainer",
+            "lghub", "GamingServices", "GamingServicesNet", "EpicGamesLauncher",
+            "FortniteClient-Win64-Shipping", "EasyAntiCheat", "EasyAntiCheat_EOS", "BEService" },
+            process => Assert.Contains(process, ModePolicy.ProtectedProcesses));
     }
 
     [Fact]
@@ -150,6 +233,13 @@ public sealed class ModeOrchestratorTests
         var controller = new WindowsSystemController(runner);
         await Assert.ThrowsAsync<InvalidOperationException>(() => controller.StopServiceAsync("WinDefend"));
         Assert.Equal(0, runner.Calls);
+    }
+
+    [Fact]
+    public async Task ProtectedProcessStop_IsRejectedBeforeProcessEnumeration()
+    {
+        var controller = new WindowsSystemController(new RecordingRunner());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => controller.StopProcessAsync("MsMpEng"));
     }
 
     [Fact]

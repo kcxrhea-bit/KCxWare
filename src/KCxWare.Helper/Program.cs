@@ -27,7 +27,8 @@ internal static class HelperProgram
                 throw new ArgumentException("Expected arm, apply-armed, recover, or cancel.");
             }
 
-            var orchestrator = new ModeOrchestrator(new JsonStateStore(), new WindowsSystemController(new CommandRunner()));
+            var orchestrator = new ModeOrchestrator(new JsonStateStore(),
+                new WindowsSystemController(new CommandRunner()), message => WriteLog(logPath, message));
             switch (args[0].ToLowerInvariant())
             {
                 case "arm" when args.Length >= 2 && Enum.TryParse<MachineMode>(args[1], true, out var mode):
