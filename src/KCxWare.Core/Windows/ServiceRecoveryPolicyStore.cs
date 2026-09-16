@@ -17,6 +17,7 @@ public sealed class ServiceRecoveryPolicyStore : IServiceRecoveryPolicyStore
     private const uint ScManagerConnect = 0x0001;
     private const uint ServiceQueryConfig = 0x0001;
     private const uint ServiceChangeConfig = 0x0002;
+    private const uint ServiceStart = 0x0010;
     private const uint ServiceConfigFailureActions = 2;
     private const uint ServiceConfigFailureActionsFlag = 4;
     private const int ErrorInsufficientBuffer = 122;
@@ -33,14 +34,23 @@ public sealed class ServiceRecoveryPolicyStore : IServiceRecoveryPolicyStore
 
     /// <summary>
     /// Access mask used to open the service handle for the mutating path
-    /// (<see cref="SetFailureActionsAsync"/>). Requests <c>SERVICE_CHANGE_CONFIG | SERVICE_QUERY_CONFIG</c>
-    /// (0x0003) - <c>SERVICE_CHANGE_CONFIG</c> is required by <c>ChangeServiceConfig2W</c>, and
+    /// (<see cref="SetFailureActionsAsync"/>). Requests
+    /// <c>SERVICE_CHANGE_CONFIG | SERVICE_QUERY_CONFIG | SERVICE_START</c> (0x0013) -
+    /// <c>SERVICE_CHANGE_CONFIG</c> is required by <c>ChangeServiceConfig2W</c>,
     /// <c>SERVICE_QUERY_CONFIG</c> is required for the fail-closed readback verification
-    /// (<c>QueryServiceConfig2W</c>) performed on the same handle immediately after the write.
+    /// (<c>QueryServiceConfig2W</c>) performed on the same handle immediately after the write, and
+    /// <c>SERVICE_START</c> is required per MSDN (ChangeServiceConfig2W /
+    /// SERVICE_CONFIG_FAILURE_ACTIONS): "If the service controller handles the SC_ACTION_RESTART
+    /// action, hService must have the SERVICE_START access right." This handle is reused for every
+    /// call this store makes to <c>ChangeServiceConfig2W</c> with SERVICE_CONFIG_FAILURE_ACTIONS -
+    /// both the suppression write (0 actions, no SC_ACTION_RESTART) and the restoration write (which
+    /// writes back the captured SC_ACTION_RESTART entries) - so the mask must cover the restoration
+    /// case's requirement even though the suppression write's own payload does not literally contain
+    /// SC_ACTION_RESTART.
     /// Deliberately not <c>SERVICE_ALL_ACCESS</c> (0xF01FF) - least privilege, nothing broader than
     /// this path actually needs.
     /// </summary>
-    public const uint ChangeAccessMask = ServiceChangeConfig | ServiceQueryConfig;
+    public const uint ChangeAccessMask = ServiceChangeConfig | ServiceQueryConfig | ServiceStart;
 
     public async Task<ServiceFailureActionsConfig> GetFailureActionsAsync(string serviceName,
         CancellationToken cancellationToken = default)
