@@ -31,8 +31,12 @@ internal static class HelperProgram
 
             var progressPipe = GetOption(args, "--progress");
             var progress = progressPipe is null ? null : new NamedPipeTransitionProgressReporter(progressPipe);
+            // Explicitly wire the real Win32 ServiceRecoveryPolicyStore (rather than relying on
+            // WindowsSystemController's optional constructor default) so the production Gaming path
+            // is unmissably using the real SCM-backed implementation, not a silently-defaulted one.
             var orchestrator = new ModeOrchestrator(new JsonStateStore(),
-                new WindowsSystemController(new CommandRunner()), message => WriteLog(logPath, message), progress);
+                new WindowsSystemController(new CommandRunner(), new ServiceRecoveryPolicyStore()),
+                message => WriteLog(logPath, message), progress);
             switch (args[0].ToLowerInvariant())
             {
                 case "apply-live" when args.Length >= 2 && Enum.TryParse<MachineMode>(args[1], true, out var mode):

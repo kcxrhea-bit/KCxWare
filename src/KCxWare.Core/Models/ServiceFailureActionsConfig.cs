@@ -23,12 +23,18 @@ public sealed record ServiceFailureActionsConfig(
     uint ResetPeriodSeconds,
     string? RebootMessage,
     string? Command,
-    IReadOnlyList<ServiceFailureAction> Actions)
+    IReadOnlyList<ServiceFailureAction> Actions,
+    /// <summary>
+    /// Mirrors SERVICE_CONFIG_FAILURE_ACTIONS_FLAG / SERVICE_FAILURE_ACTIONS_FLAG.fFailureActionsOnNonCrashFailures.
+    /// Captured and restored alongside the actions themselves so restoration reproduces the exact
+    /// original SCM behavior rather than leaving Windows' default (unset) flag state behind.
+    /// </summary>
+    bool ActionsOnNonCrashFailures = false)
 {
     /// <summary>
     /// Represents "no failure actions configured" - used to temporarily suppress SCM auto-restart
     /// of a service KCxWare intentionally stops. Never persisted as a captured baseline value; only
     /// ever written transiently and later replaced by the real captured configuration on restore.
     /// </summary>
-    public static ServiceFailureActionsConfig NoRecovery { get; } = new(0, null, null, []);
+    public static ServiceFailureActionsConfig NoRecovery { get; } = new(0, null, null, [], false);
 }

@@ -61,7 +61,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public MainViewModel()
     {
-        _orchestrator = new ModeOrchestrator(_stateStore, new WindowsSystemController(new CommandRunner()));
+        _orchestrator = new ModeOrchestrator(_stateStore,
+            new WindowsSystemController(new CommandRunner(), new ServiceRecoveryPolicyStore()));
         PowerOrchestrator = new PowerOrchestrator(_orchestrator, _stateStore, new HelperPowerActionInvoker(this));
         LoadingCoordinator.Changed += () => IsBusy = LoadingCoordinator.Current is not null;
     }

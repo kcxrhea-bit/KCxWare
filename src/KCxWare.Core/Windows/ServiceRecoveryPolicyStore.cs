@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Linq;
 using KCxWare.Core.Abstractions;
 using KCxWare.Core.Models;
 
@@ -17,15 +18,50 @@ public sealed class ServiceRecoveryPolicyStore : IServiceRecoveryPolicyStore
     private const uint ServiceQueryConfig = 0x0001;
     private const uint ServiceChangeConfig = 0x0002;
     private const uint ServiceConfigFailureActions = 2;
+    private const uint ServiceConfigFailureActionsFlag = 4;
     private const int ErrorInsufficientBuffer = 122;
 
-    public Task<ServiceFailureActionsConfig> GetFailureActionsAsync(string serviceName,
+    public async Task<ServiceFailureActionsConfig> GetFailureActionsAsync(string serviceName,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         using var scManager = OpenManager();
         using var service = OpenServiceHandle(scManager, serviceName, ServiceQueryConfig);
 
+        var actions = ReadFailureActions(service, serviceName);
+        var flag = ReadFailureActionsFlag(service, serviceName);
+        await Task.CompletedTask;
+        return actions with { ActionsOnNonCrashFailures = flag };
+    }
+
+    public async Task SetFailureActionsAsync(string serviceName, ServiceFailureActionsConfig config,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var scManager = OpenManager();
+        using var service = OpenServiceHandle(scManager, serviceName, ServiceChangeConfig | ServiceQueryConfig);
+
+        WriteFailureActions(service, serviceName, config);
+        WriteFailureActionsFlag(service, serviceName, config.ActionsOnNonCrashFailures);
+
+        // Fail closed: never trust that ChangeServiceConfig2W returning TRUE means the SCM actually
+        // applied the requested configuration. Read the live config straight back and compare against
+        // what was requested before letting the caller proceed (e.g. before stopping the service).
+        var readBack = ReadFailureActions(service, serviceName);
+        if (readBack.Actions.Count != config.Actions.Count ||
+            !readBack.Actions.SequenceEqual(config.Actions))
+        {
+            throw new InvalidOperationException(
+                $"Failed to verify failure-action configuration for service {serviceName} after " +
+                "ChangeServiceConfig2W reported success: the SCM's stored configuration does not match " +
+                "what was requested.");
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private static ServiceFailureActionsConfig ReadFailureActions(SafeScHandle service, string serviceName)
+    {
         if (!NativeMethods.QueryServiceConfig2W(service.DangerousGetHandle(), ServiceConfigFailureActions,
                 IntPtr.Zero, 0, out var needed) && Marshal.GetLastWin32Error() != ErrorInsufficientBuffer)
         {
@@ -51,8 +87,7 @@ public sealed class ServiceRecoveryPolicyStore : IServiceRecoveryPolicyStore
                 actions.Add(new ServiceFailureAction((ServiceFailureActionType)action.Type, action.Delay));
             }
 
-            return Task.FromResult(new ServiceFailureActionsConfig(raw.dwResetPeriod, raw.lpRebootMsg,
-                raw.lpCommand, actions));
+            return new ServiceFailureActionsConfig(raw.dwResetPeriod, raw.lpRebootMsg, raw.lpCommand, actions);
         }
         finally
         {
@@ -60,14 +95,40 @@ public sealed class ServiceRecoveryPolicyStore : IServiceRecoveryPolicyStore
         }
     }
 
-    public Task SetFailureActionsAsync(string serviceName, ServiceFailureActionsConfig config,
-        CancellationToken cancellationToken = default)
+    private static bool ReadFailureActionsFlag(SafeScHandle service, string serviceName)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        using var scManager = OpenManager();
-        using var service = OpenServiceHandle(scManager, serviceName, ServiceChangeConfig);
+        if (!NativeMethods.QueryServiceConfig2W(service.DangerousGetHandle(), ServiceConfigFailureActionsFlag,
+                IntPtr.Zero, 0, out var needed) && Marshal.GetLastWin32Error() != ErrorInsufficientBuffer)
+        {
+            throw Failure($"query failure actions flag for service {serviceName}");
+        }
 
+        var buffer = Marshal.AllocHGlobal((int)needed);
+        try
+        {
+            if (!NativeMethods.QueryServiceConfig2W(service.DangerousGetHandle(), ServiceConfigFailureActionsFlag,
+                    buffer, needed, out _))
+            {
+                throw Failure($"query failure actions flag for service {serviceName}");
+            }
+
+            var raw = Marshal.PtrToStructure<NativeMethods.SERVICE_FAILURE_ACTIONS_FLAG>(buffer);
+            return raw.fFailureActionsOnNonCrashFailures;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    private static void WriteFailureActions(SafeScHandle service, string serviceName,
+        ServiceFailureActionsConfig config)
+    {
         var actionSize = Marshal.SizeOf<NativeMethods.SC_ACTION>();
+        // Per MSDN (ChangeServiceConfig2W / SERVICE_FAILURE_ACTIONS): to clear/disable recovery
+        // actions, cActions must be 0 and lpsaActions must be NULL - not a non-null pointer to a
+        // zero-length or "no-op" array. A managed zero-length array still marshals to a non-null
+        // pointer, so this must stay an explicit IntPtr.Zero for the suppression case.
         var actionsBuffer = config.Actions.Count == 0
             ? IntPtr.Zero
             : Marshal.AllocHGlobal(actionSize * config.Actions.Count);
@@ -83,9 +144,9 @@ public sealed class ServiceRecoveryPolicyStore : IServiceRecoveryPolicyStore
 
             var info = new NativeMethods.SERVICE_FAILURE_ACTIONS
             {
-                dwResetPeriod = config.ResetPeriodSeconds,
-                lpRebootMsg = config.RebootMessage,
-                lpCommand = config.Command,
+                dwResetPeriod = config.Actions.Count == 0 ? 0 : config.ResetPeriodSeconds,
+                lpRebootMsg = config.Actions.Count == 0 ? null : config.RebootMessage,
+                lpCommand = config.Actions.Count == 0 ? null : config.Command,
                 cActions = (uint)config.Actions.Count,
                 lpsaActions = actionsBuffer
             };
@@ -97,8 +158,6 @@ public sealed class ServiceRecoveryPolicyStore : IServiceRecoveryPolicyStore
             {
                 throw Failure($"set failure actions for service {serviceName}");
             }
-
-            return Task.CompletedTask;
         }
         finally
         {
@@ -111,6 +170,25 @@ public sealed class ServiceRecoveryPolicyStore : IServiceRecoveryPolicyStore
             {
                 Marshal.FreeHGlobal(actionsBuffer);
             }
+        }
+    }
+
+    private static void WriteFailureActionsFlag(SafeScHandle service, string serviceName, bool onNonCrashFailures)
+    {
+        var flag = new NativeMethods.SERVICE_FAILURE_ACTIONS_FLAG { fFailureActionsOnNonCrashFailures = onNonCrashFailures };
+        var buffer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeMethods.SERVICE_FAILURE_ACTIONS_FLAG>());
+        try
+        {
+            Marshal.StructureToPtr(flag, buffer, false);
+            if (!NativeMethods.ChangeServiceConfig2W(service.DangerousGetHandle(), ServiceConfigFailureActionsFlag,
+                    buffer))
+            {
+                throw Failure($"set failure actions flag for service {serviceName}");
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
         }
     }
 
@@ -165,6 +243,13 @@ public sealed class ServiceRecoveryPolicyStore : IServiceRecoveryPolicyStore
             public string? lpCommand;
             public uint cActions;
             public IntPtr lpsaActions;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct SERVICE_FAILURE_ACTIONS_FLAG
+        {
+            [MarshalAs(UnmanagedType.Bool)]
+            public bool fFailureActionsOnNonCrashFailures;
         }
 
         [DllImport("advapi32.dll", EntryPoint = "OpenSCManagerW", SetLastError = true, CharSet = CharSet.Unicode)]

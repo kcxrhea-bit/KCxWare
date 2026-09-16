@@ -255,6 +255,9 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
                 // changed, so a crash mid-transition still leaves the exact original SCM
                 // recovery configuration recoverable via safe recovery / boot normalization.
                 failureActions = await system.GetServiceFailureActionsAsync(service, cancellationToken);
+                log?.Invoke($"Captured recovery policy for {service}: action count={failureActions.Actions.Count}, " +
+                    $"types={string.Join(",", failureActions.Actions.Select(action => action.Type))}, " +
+                    $"delaysMs={string.Join(",", failureActions.Actions.Select(action => action.DelayMs))}.");
             }
 
             snapshots.Add(new ServiceSnapshot(service, running.Value, failureActions));
@@ -272,7 +275,22 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
         // BEFORE stopping them. This prevents the restart at the SCM level instead of racing it.
         foreach (var service in ModePolicy.RecoverySuppressedServices)
         {
+            log?.Invoke($"Requesting recovery-policy suppression for {service}.");
             await system.SetServiceFailureActionsAsync(service, ServiceFailureActionsConfig.NoRecovery, cancellationToken);
+
+            // Fail closed: SetServiceFailureActionsAsync succeeding does not by itself prove the SCM
+            // is honoring the suppressed policy going forward (the store's own readback only proves
+            // the change was accepted at the moment it was made). Re-read it here, immediately before
+            // any StopServiceAsync call, so a suppression that silently reverted - or was never
+            // effective for this specific service/flag combination - aborts BEFORE cleanup starts
+            // rather than surfacing 80+ seconds later as an opaque verification-loop failure.
+            var effective = await system.GetServiceFailureActionsAsync(service, cancellationToken);
+            log?.Invoke($"Post-suppression readback for {service}: action count={effective.Actions.Count}, " +
+                $"types={string.Join(",", effective.Actions.Select(action => action.Type))}.");
+            if (effective.Actions.Count != 0)
+            {
+                throw new InvalidOperationException("WSearch recovery-policy suppression could not be verified.");
+            }
         }
 
         var safetySkippedServices = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -301,6 +319,11 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
                 {
                     safetySkippedServices.Add(service);
                     continue;
+                }
+
+                if (ModePolicy.RecoverySuppressedServices.Contains(service))
+                {
+                    log?.Invoke($"Requesting stop for recovery-suppressed service {service} (attempt {attempt}).");
                 }
 
                 await system.StopServiceAsync(service, cancellationToken);
@@ -442,7 +465,13 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
                 // hardcoded guess - before touching the service's running state. This is the same
                 // path used by Normal restoration, Programming, safe recovery, interrupted-transition
                 // recovery, and boot normalization, since they all funnel through this method.
+                log?.Invoke($"Requesting recovery-policy restoration for {snapshot.Name}: " +
+                    $"action count={snapshot.FailureActions.Actions.Count}.");
                 await system.SetServiceFailureActionsAsync(snapshot.Name, snapshot.FailureActions, cancellationToken);
+                var restored = await system.GetServiceFailureActionsAsync(snapshot.Name, cancellationToken);
+                log?.Invoke($"Post-restore verification for {snapshot.Name}: action count={restored.Actions.Count}, " +
+                    $"types={string.Join(",", restored.Actions.Select(action => action.Type))}, " +
+                    $"delaysMs={string.Join(",", restored.Actions.Select(action => action.DelayMs))}.");
             }
 
             if (snapshot.WasRunning && await system.IsServiceRunningAsync(snapshot.Name, cancellationToken) == false)

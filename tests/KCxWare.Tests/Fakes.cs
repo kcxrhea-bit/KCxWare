@@ -70,6 +70,14 @@ internal sealed class FakeSystem : ISystemController
     public Dictionary<string, ServiceFailureActionsConfig> FailureActionsConfigured { get; } = new(StringComparer.OrdinalIgnoreCase);
     public List<string> FailureActionsSuppressedCalls { get; } = [];
     public List<string> FailureActionsRestoredCalls { get; } = [];
+
+    /// <summary>
+    /// Names of services for which SetServiceFailureActionsAsync silently no-ops instead of applying
+    /// the requested config - simulating a real-machine ChangeServiceConfig2W call that reports
+    /// success but the SCM does not actually apply, so tests can prove the orchestrator's
+    /// post-suppression readback catches it instead of trusting the Set call blindly.
+    /// </summary>
+    public HashSet<string> SuppressionIneffectiveFor { get; } = new(StringComparer.OrdinalIgnoreCase);
     public HashSet<string> Plans { get; } = new(StringComparer.OrdinalIgnoreCase);
     public List<string> StoppedServices { get; } = [];
     public List<string> StartedServices { get; } = [];
@@ -118,8 +126,18 @@ internal sealed class FakeSystem : ISystemController
     }
     public Task SetServiceFailureActionsAsync(string name, ServiceFailureActionsConfig config, CancellationToken cancellationToken = default)
     {
+        var suppressing = config.Actions.Count == 0;
+        (suppressing ? FailureActionsSuppressedCalls : FailureActionsRestoredCalls).Add(name);
+        Operations.Add(suppressing ? $"suppress-failure-actions:{name}" : $"restore-failure-actions:{name}");
+        if (SuppressionIneffectiveFor.Contains(name))
+        {
+            // Deliberately do NOT update FailureActionsConfigured - the "Set" call is accepted but
+            // has no real effect, mirroring a ChangeServiceConfig2W call that returns success without
+            // the SCM actually applying the change.
+            return Task.CompletedTask;
+        }
+
         FailureActionsConfigured[name] = config;
-        (config.Actions.Count == 0 ? FailureActionsSuppressedCalls : FailureActionsRestoredCalls).Add(name);
         return Task.CompletedTask;
     }
     public Task<bool> IsProcessRunningAsync(string name, bool backgroundOnly = false,

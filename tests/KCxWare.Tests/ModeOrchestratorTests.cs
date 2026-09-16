@@ -274,6 +274,64 @@ public sealed class ModeOrchestratorTests
     }
 
     [Fact]
+    public async Task GamingCleanup_FailsClosedWhenSuppressionCannotBeVerified()
+    {
+        var store = new MemoryStateStore(new ModeState());
+        var system = SystemWithPlans();
+        system.Services["WSearch"] = true;
+        // Simulates ChangeServiceConfig2W reporting success while the SCM did not actually apply
+        // the suppression - the orchestrator's post-suppression readback must catch this and abort
+        // before StopServiceAsync is ever called for WSearch, not surface an opaque cleanup failure
+        // 80+ seconds later.
+        system.SuppressionIneffectiveFor.Add("WSearch");
+
+        var result = await new ModeOrchestrator(store, system).ApplyLiveAsync(MachineMode.Gaming);
+
+        Assert.Equal(MachineMode.RecoveryRequired, result.CurrentMode);
+        Assert.Equal("WSearch recovery-policy suppression could not be verified.", result.LastError);
+        Assert.DoesNotContain("stop-service:WSearch", system.Operations);
+        Assert.DoesNotContain("WSearch", system.StoppedServices);
+    }
+
+    [Fact]
+    public async Task GamingCleanup_SuppressionIsVerifiedBeforeAnyServiceIsStopped()
+    {
+        var store = new MemoryStateStore(new ModeState());
+        var system = SystemWithPlans();
+        system.Services["WSearch"] = true;
+        system.Services["DoSvc"] = true;
+
+        await new ModeOrchestrator(store, system).ApplyLiveAsync(MachineMode.Gaming);
+
+        var suppressIndex = system.Operations.IndexOf("suppress-failure-actions:WSearch");
+        var stopIndex = system.Operations.IndexOf("stop-service:WSearch");
+        Assert.True(suppressIndex >= 0, "Expected a recorded suppression call for WSearch.");
+        Assert.True(stopIndex >= 0, "Expected a recorded stop call for WSearch.");
+        Assert.True(suppressIndex < stopIndex,
+            $"Suppression (index {suppressIndex}) must happen before StopServiceAsync (index {stopIndex}).");
+    }
+
+    [Fact]
+    public async Task GamingToNormal_RestoresCapturedFailureActionsFlagAlongsideActions()
+    {
+        var store = new MemoryStateStore(new ModeState());
+        var system = SystemWithPlans();
+        system.Services["WSearch"] = true;
+        system.FailureActionsConfigured["WSearch"] = new ServiceFailureActionsConfig(86400, null, null,
+            [new ServiceFailureAction(ServiceFailureActionType.RestartService, 30000)], true);
+        var orchestrator = new ModeOrchestrator(store, system);
+
+        var gaming = await orchestrator.ApplyLiveAsync(MachineMode.Gaming);
+        var captured = gaming.ChangedServices.Single(service => service.Name == "WSearch").FailureActions;
+        Assert.NotNull(captured);
+        Assert.True(captured!.ActionsOnNonCrashFailures);
+
+        await orchestrator.ApplyLiveAsync(MachineMode.Normal);
+
+        Assert.True(system.FailureActionsConfigured["WSearch"].ActionsOnNonCrashFailures);
+    }
+
+    [Fact]
     public async Task GamingCleanup_RealWSearchSurvivorStillFailsVerification()
     {
         var store = new MemoryStateStore(new ModeState());
