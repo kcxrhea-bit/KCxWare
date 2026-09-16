@@ -7,8 +7,8 @@ namespace KCxWare.Core.Loading;
 /// </summary>
 public static class LoadingAssetLocator
 {
-    public const string VideoRelativePath = "Assets\\final.mp4";
+    public const string VideoRelativePath = "Assets\\kcxparade.mp4";
 
     public static string ResolveVideoPath(string applicationBaseDirectory) =>
-        Path.Combine(applicationBaseDirectory, "Assets", "final.mp4");
+        Path.Combine(applicationBaseDirectory, "Assets", "kcxparade.mp4");
 }

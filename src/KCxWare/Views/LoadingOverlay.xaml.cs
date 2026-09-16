@@ -10,7 +10,7 @@ using KCxWare.ViewModels;
 namespace KCxWare.Views;
 
 /// <summary>
-/// Renders the centralized KCx loading experience: the looping neon parade (assets\final.mp4,
+/// Renders the centralized KCx loading experience: the looping neon parade (assets\kcxparade.mp4,
 /// copied beside the executable at build/publish time) plus the cumulative 20/40/60/80/100
 /// milestone row. Starts/stops the video based on overlay visibility so it never consumes
 /// decode resources while the loading UI isn't mounted.

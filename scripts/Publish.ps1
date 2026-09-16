@@ -16,7 +16,7 @@ if ($LASTEXITCODE -ne 0) { throw 'KCxWare publish failed.' }
 dotnet publish (Join-Path $resolvedRoot 'src\KCxWare.Helper\KCxWare.Helper.csproj') -c Release -r win-x64 --self-contained false --no-restore -o $publishPath
 if ($LASTEXITCODE -ne 0) { throw 'KCxWare.Helper publish failed.' }
 
-$required = @('KCxWare.exe', 'KCxWare.Helper.exe', 'Assets\1.png', 'Assets\final.mp4')
+$required = @('KCxWare.exe', 'KCxWare.Helper.exe', 'Assets\1.png', 'Assets\kcxparade.mp4')
 foreach ($relativePath in $required) {
     if (-not (Test-Path -LiteralPath (Join-Path $publishPath $relativePath))) {
         throw "Published artifact is missing $relativePath."

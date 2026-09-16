@@ -11,7 +11,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 
 $source = (Resolve-Path -LiteralPath $SourcePath).Path
-foreach ($required in @('KCxWare.exe', 'KCxWare.Helper.exe', 'Assets\1.png', 'Assets\final.mp4')) {
+foreach ($required in @('KCxWare.exe', 'KCxWare.Helper.exe', 'Assets\1.png', 'Assets\kcxparade.mp4')) {
     if (-not (Test-Path -LiteralPath (Join-Path $source $required))) { throw "Missing published file: $required" }
 }
 

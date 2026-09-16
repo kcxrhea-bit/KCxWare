@@ -80,7 +80,14 @@ public partial class MainWindow
         await Dispatcher.Yield(DispatcherPriority.Render);
 
         using var progressServer = StartProgressServer(op);
-        await RunElevatedTransitionAsync($"apply-live {mode} --progress {progressServer.PipeName}", closeAfterSuccess: false, op);
+        await RunElevatedTransitionAsync($"apply-live {mode} --progress {progressServer.PipeName}", closeAfterSuccess: false, op,
+            onSuccess: () =>
+            {
+                // Automatic completion flavor text: a randomly selected saying from this mode's
+                // approved pool, shown as the operation's text-only completion screen.
+                var flavor = CompletionMessages.SelectModeMessage(mode, _random);
+                op.CompleteWithMessage(flavor.Title, flavor.Subtitle);
+            });
         if (!op.IsFailed) await _viewModel.RefreshAsync();
     }
 
@@ -134,7 +141,8 @@ public partial class MainWindow
     /// verified zero exit code does the operation complete and, for reboot transitions, the
     /// window close; any other outcome surfaces as a real failure with the helper's exit code.
     /// </summary>
-    private async Task RunElevatedTransitionAsync(string command, bool closeAfterSuccess, LoadingHandle op)
+    private async Task RunElevatedTransitionAsync(string command, bool closeAfterSuccess, LoadingHandle op,
+        Action? onSuccess = null)
     {
         try
         {
@@ -146,7 +154,8 @@ public partial class MainWindow
                 return;
             }
 
-            op.Complete("Elevation granted.");
+            if (onSuccess is not null) onSuccess();
+            else op.Complete("Elevation granted.");
             if (closeAfterSuccess) Application.Current.Shutdown();
         }
         catch (Exception exception)
