@@ -72,15 +72,18 @@ public sealed class ServiceRecoveryPolicyStore : IServiceRecoveryPolicyStore
         using var scManager = OpenManager();
         using var service = OpenServiceHandle(scManager, serviceName, ChangeAccessMask);
 
-        WriteFailureActions(service, serviceName, config);
+        var effectiveActions = WriteFailureActions(service, serviceName, config);
         WriteFailureActionsFlag(service, serviceName, config.ActionsOnNonCrashFailures);
 
         // Fail closed: never trust that ChangeServiceConfig2W returning TRUE means the SCM actually
         // applied the requested configuration. Read the live config straight back and compare against
-        // what was requested before letting the caller proceed (e.g. before stopping the service).
+        // what was actually sent to ChangeServiceConfig2W (see WriteFailureActions - the suppression
+        // case substitutes a single explicit SC_ACTION_NONE entry for an empty action list, because a
+        // real SCM does not reliably clear a previously stored action array via cActions=0/
+        // lpsaActions=NULL alone) before letting the caller proceed (e.g. before stopping the service).
         var readBack = ReadFailureActions(service, serviceName);
-        if (readBack.Actions.Count != config.Actions.Count ||
-            !readBack.Actions.SequenceEqual(config.Actions))
+        if (readBack.Actions.Count != effectiveActions.Count ||
+            !readBack.Actions.SequenceEqual(effectiveActions))
         {
             throw new InvalidOperationException(
                 $"Failed to verify failure-action configuration for service {serviceName} after " +
@@ -175,23 +178,47 @@ public sealed class ServiceRecoveryPolicyStore : IServiceRecoveryPolicyStore
     public static bool ParseFailureActionsFlag(IntPtr buffer) =>
         Marshal.PtrToStructure<NativeMethods.SERVICE_FAILURE_ACTIONS_FLAG>(buffer).fFailureActionsOnNonCrashFailures;
 
-    private static void WriteFailureActions(SafeScHandle service, string serviceName,
-        ServiceFailureActionsConfig config)
+    /// <summary>
+    /// Builds the exact list of <see cref="ServiceFailureAction"/> entries that
+    /// <see cref="WriteFailureActions"/> marshals into the native <c>SERVICE_FAILURE_ACTIONS</c>
+    /// payload for a given requested <paramref name="config"/>.
+    /// <para>
+    /// For a non-empty requested action list (the restoration path), this is exactly
+    /// <c>config.Actions</c> - unchanged from prior behavior.
+    /// </para>
+    /// <para>
+    /// For an empty requested action list (the suppression path, e.g. <see cref="ServiceFailureActionsConfig.NoRecovery"/>),
+    /// this is a single explicit <c>SC_ACTION_NONE</c>/0ms entry rather than zero entries. This is a
+    /// documented real-world Win32 SCM quirk: passing <c>cActions=0</c> with <c>lpsaActions=NULL</c>
+    /// to <c>ChangeServiceConfig2W</c>/<c>SERVICE_CONFIG_FAILURE_ACTIONS</c> is accepted (the call
+    /// reports success) but does not reliably overwrite a previously stored non-empty action array on
+    /// a real SCM - the old array is left in place. The commonly used workaround (matching what
+    /// <c>sc.exe failure</c> and other production tooling do to reliably clear recovery actions) is to
+    /// write a single explicit "do nothing" action (<c>SC_ACTION_NONE</c>, delay 0) instead of an
+    /// empty array, which the SCM does honor as a real replacement of the stored array.
+    /// </para>
+    /// </summary>
+    public static IReadOnlyList<ServiceFailureAction> BuildEffectiveActions(ServiceFailureActionsConfig config) =>
+        config.Actions.Count == 0
+            ? [new ServiceFailureAction(ServiceFailureActionType.None, 0)]
+            : config.Actions;
+
+    private static IReadOnlyList<ServiceFailureAction> WriteFailureActions(SafeScHandle service,
+        string serviceName, ServiceFailureActionsConfig config)
     {
+        var effectiveActions = BuildEffectiveActions(config);
         var actionSize = Marshal.SizeOf<NativeMethods.SC_ACTION>();
-        // Per MSDN (ChangeServiceConfig2W / SERVICE_FAILURE_ACTIONS): to clear/disable recovery
-        // actions, cActions must be 0 and lpsaActions must be NULL - not a non-null pointer to a
-        // zero-length or "no-op" array. A managed zero-length array still marshals to a non-null
-        // pointer, so this must stay an explicit IntPtr.Zero for the suppression case.
-        var actionsBuffer = config.Actions.Count == 0
-            ? IntPtr.Zero
-            : Marshal.AllocHGlobal(actionSize * config.Actions.Count);
+        // effectiveActions is never empty (see BuildEffectiveActions), so lpsaActions is always a
+        // real, non-null pointer to at least one SC_ACTION entry - including for the suppression case,
+        // where it points at a single explicit SC_ACTION_NONE entry rather than being NULL. See
+        // BuildEffectiveActions for why a bare cActions=0/lpsaActions=NULL clear is not used here.
+        var actionsBuffer = Marshal.AllocHGlobal(actionSize * effectiveActions.Count);
         var infoBuffer = IntPtr.Zero;
         try
         {
-            for (var index = 0; index < config.Actions.Count; index++)
+            for (var index = 0; index < effectiveActions.Count; index++)
             {
-                var action = config.Actions[index];
+                var action = effectiveActions[index];
                 var native = new NativeMethods.SC_ACTION { Type = (int)action.Type, Delay = action.DelayMs };
                 Marshal.StructureToPtr(native, IntPtr.Add(actionsBuffer, index * actionSize), false);
             }
@@ -201,7 +228,7 @@ public sealed class ServiceRecoveryPolicyStore : IServiceRecoveryPolicyStore
                 dwResetPeriod = config.Actions.Count == 0 ? 0 : config.ResetPeriodSeconds,
                 lpRebootMsg = config.Actions.Count == 0 ? null : config.RebootMessage,
                 lpCommand = config.Actions.Count == 0 ? null : config.Command,
-                cActions = (uint)config.Actions.Count,
+                cActions = (uint)effectiveActions.Count,
                 lpsaActions = actionsBuffer
             };
             infoBuffer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeMethods.SERVICE_FAILURE_ACTIONS>());
@@ -212,6 +239,8 @@ public sealed class ServiceRecoveryPolicyStore : IServiceRecoveryPolicyStore
             {
                 throw Failure($"set failure actions for service {serviceName}");
             }
+
+            return effectiveActions;
         }
         finally
         {
