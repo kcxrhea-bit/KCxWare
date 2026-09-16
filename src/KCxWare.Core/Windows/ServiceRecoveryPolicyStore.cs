@@ -134,23 +134,46 @@ public sealed class ServiceRecoveryPolicyStore : IServiceRecoveryPolicyStore
             throw Failure($"query failure actions flag for service {serviceName}");
         }
 
-        var buffer = Marshal.AllocHGlobal((int)needed);
+        // SERVICE_FAILURE_ACTIONS_FLAG is a fixed-size struct containing a single 4-byte BOOL. Unlike
+        // the variable-length SERVICE_FAILURE_ACTIONS query above (where the SCM-reported
+        // pcbBytesNeeded is always far larger than any degenerate value could be, so this never
+        // matters there), a probe call for this small fixed struct can report a bytesNeeded smaller
+        // than sizeof(SERVICE_FAILURE_ACTIONS_FLAG) - trusting that value verbatim would allocate an
+        // undersized buffer and/or pass an undersized bufferSize to the real call, and
+        // Marshal.PtrToStructure would then read past/under the actual native write, silently
+        // producing a wrong boolean (observed in practice as TRUE being read back as FALSE) instead of
+        // failing loudly. Floor the buffer size at the struct's real managed/native size so the
+        // allocation and the second QueryServiceConfig2W call are always big enough to hold what
+        // Marshal.PtrToStructure is about to read.
+        var flagStructSize = (uint)Marshal.SizeOf<NativeMethods.SERVICE_FAILURE_ACTIONS_FLAG>();
+        var bufferSize = Math.Max(needed, flagStructSize);
+
+        var buffer = Marshal.AllocHGlobal((int)bufferSize);
         try
         {
             if (!NativeMethods.QueryServiceConfig2W(service.DangerousGetHandle(), ServiceConfigFailureActionsFlag,
-                    buffer, needed, out _))
+                    buffer, bufferSize, out _))
             {
                 throw Failure($"query failure actions flag for service {serviceName}");
             }
 
-            var raw = Marshal.PtrToStructure<NativeMethods.SERVICE_FAILURE_ACTIONS_FLAG>(buffer);
-            return raw.fFailureActionsOnNonCrashFailures;
+            return ParseFailureActionsFlag(buffer);
         }
         finally
         {
             Marshal.FreeHGlobal(buffer);
         }
     }
+
+    /// <summary>
+    /// Parses a native <c>SERVICE_FAILURE_ACTIONS_FLAG</c> buffer already populated by
+    /// <c>QueryServiceConfig2W</c> (or, in tests, by <c>Marshal.StructureToPtr</c> simulating that
+    /// call). Extracted from <see cref="ReadFailureActionsFlag"/> so the parsing logic itself -
+    /// independent of the live P/Invoke call and buffer-sizing dance above it - is directly testable
+    /// against a real unmanaged buffer.
+    /// </summary>
+    public static bool ParseFailureActionsFlag(IntPtr buffer) =>
+        Marshal.PtrToStructure<NativeMethods.SERVICE_FAILURE_ACTIONS_FLAG>(buffer).fFailureActionsOnNonCrashFailures;
 
     private static void WriteFailureActions(SafeScHandle service, string serviceName,
         ServiceFailureActionsConfig config)
