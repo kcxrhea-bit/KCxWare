@@ -20,6 +20,100 @@ public sealed partial class WindowsSystemController(ICommandRunner runner,
         CancellationToken cancellationToken = default) =>
         _recoveryPolicyStore.SetFailureActionsAsync(name, config, cancellationToken);
     public string CurrentSessionId => Environment.TickCount64.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    public async Task<MachineCapabilities> DetectCapabilitiesAsync(CancellationToken cancellationToken = default)
+    {
+        var graphicsVendors = await DetectGraphicsVendorsAsync(cancellationToken);
+        var developmentTools = new List<string>();
+
+        await AddIfCommandExistsAsync(developmentTools, "Git", "git.exe", cancellationToken);
+        if (File.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                "Git", "bin", "bash.exe")) ||
+            File.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Programs", "Git", "bin", "bash.exe")))
+        {
+            developmentTools.Add("Git Bash");
+        }
+
+        await AddIfCommandExistsAsync(developmentTools, "Node.js", "node.exe", cancellationToken);
+        await AddIfCommandExistsAsync(developmentTools, "npm", "npm.cmd", cancellationToken);
+        await AddIfCommandExistsAsync(developmentTools, "Docker", "docker.exe", cancellationToken);
+        await AddIfCommandExistsAsync(developmentTools, "Ollama", "ollama.exe", cancellationToken);
+        await AddIfCommandExistsAsync(developmentTools, ".NET SDK", "dotnet.exe", cancellationToken);
+        await AddIfCommandExistsAsync(developmentTools, "Visual Studio Code", "code.cmd", cancellationToken);
+
+        var wslPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "wsl.exe");
+        if (File.Exists(wslPath) && (await runner.RunAsync(wslPath, ["--status"], cancellationToken)).ExitCode == 0)
+        {
+            developmentTools.Add("WSL");
+        }
+
+        var vsWhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+            "Microsoft Visual Studio", "Installer", "vswhere.exe");
+        if (File.Exists(vsWhere))
+        {
+            developmentTools.Add("Visual Studio");
+        }
+
+        var lmStudio = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Programs", "LM Studio", "LM Studio.exe");
+        if (File.Exists(lmStudio))
+        {
+            developmentTools.Add("LM Studio");
+        }
+
+        return new MachineCapabilities(
+            graphicsVendors.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray(),
+            developmentTools.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray());
+    }
+
+    private async Task<IReadOnlyList<string>> DetectGraphicsVendorsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await runner.RunAsync("powershell.exe",
+                ["-NoProfile", "-NonInteractive", "-Command",
+                    "Get-CimInstance Win32_VideoController -ErrorAction Stop | Select-Object -ExpandProperty Name"],
+                cancellationToken);
+            if (result.ExitCode != 0)
+            {
+                return [];
+            }
+
+            var vendors = new List<string>();
+            foreach (var line in result.StandardOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (line.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase)) vendors.Add("NVIDIA");
+                else if (line.Contains("AMD", StringComparison.OrdinalIgnoreCase) ||
+                         line.Contains("Radeon", StringComparison.OrdinalIgnoreCase)) vendors.Add("AMD");
+                else if (line.Contains("Intel", StringComparison.OrdinalIgnoreCase)) vendors.Add("Intel");
+            }
+
+            return vendors;
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        {
+            return [];
+        }
+    }
+
+    private async Task AddIfCommandExistsAsync(List<string> capabilities, string label, string command,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await runner.RunAsync("where.exe", [command], cancellationToken);
+            if (result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.StandardOutput))
+            {
+                capabilities.Add(label);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        {
+            // Missing optional discovery tooling is a supported configuration.
+        }
+    }
+
     public async Task<string?> GetActivePowerPlanAsync(CancellationToken cancellationToken = default)
     {
         var result = await runner.RunAsync("powercfg.exe", ["/getactivescheme"], cancellationToken);

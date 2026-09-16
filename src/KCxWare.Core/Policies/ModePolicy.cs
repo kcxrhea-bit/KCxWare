@@ -3,15 +3,21 @@ namespace KCxWare.Core.Policies;
 public static class ModePolicy
 {
     public const string GamingPowerPlan = "9935e61f-1661-40c5-ae2f-8495027d5d5d";
+    public const string WindowsHighPerformancePowerPlan = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
     public const string AmdBalancedPowerPlan = "9897998c-92de-4669-853f-b7cd3ecb2790";
     public const string WindowsBalancedPowerPlan = "381b4222-f694-41f0-9685-ff5bb260df2e";
     public const string TransitionTaskName = "KCxWare Apply Armed Mode";
-    public static readonly TimeSpan GamingSettleDelay = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan GamingVerificationRetryDelay = TimeSpan.FromSeconds(3);
     public static readonly TimeSpan GamingCleanVerificationDelay = TimeSpan.FromSeconds(35);
     public static readonly TimeSpan ServiceStopPollDelay = TimeSpan.FromMilliseconds(250);
     public static readonly TimeSpan ServiceStopTimeout = TimeSpan.FromSeconds(20);
     public const int GamingCleanupAttempts = 3;
+
+    public static IReadOnlyList<string> GamingPowerPlanCandidates { get; } =
+        [GamingPowerPlan, WindowsHighPerformancePowerPlan];
+
+    public static IReadOnlyList<string> ProgrammingPowerPlanCandidates { get; } =
+        [GamingPowerPlan, WindowsHighPerformancePowerPlan, AmdBalancedPowerPlan, WindowsBalancedPowerPlan];
 
     public static IReadOnlySet<string> ProtectedServices { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {

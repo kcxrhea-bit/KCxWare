@@ -21,18 +21,32 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
 
         ModePolicy.AssertSafe();
         var state = await stateStore.LoadAsync(cancellationToken);
-        await system.DeleteOneShotTaskAsync(cancellationToken);
         if (state.CurrentMode == MachineMode.RecoveryRequired)
         {
+            await system.DeleteOneShotTaskAsync(cancellationToken);
             return state;
         }
 
+        var capabilities = await DetectCapabilitiesSafeAsync(cancellationToken);
+        var previousPowerPlan = state.PreviousPowerPlan ?? await system.GetActivePowerPlanAsync(cancellationToken);
+        if (state.CurrentMode == MachineMode.Normal && string.IsNullOrWhiteSpace(previousPowerPlan))
+        {
+            throw new InvalidOperationException(
+                "KCxWare could not capture the active power plan, so a safely reversible transition cannot begin.");
+        }
+
+        var installedPowerPlans = await DetectInstalledPowerPlansAsync(previousPowerPlan, cancellationToken);
+        var baseline = state.ChangedServices.Count == 0 && state.CurrentMode == MachineMode.Normal
+            ? await CaptureGamingServicesAsync(cancellationToken) : state.ChangedServices;
+        log?.Invoke($"Capability preflight: graphics={FormatNames(capabilities.GraphicsVendors)}; " +
+            $"development={FormatNames(capabilities.DevelopmentTools)}; " +
+            $"installed supported power plans={FormatNames(installedPowerPlans)}.");
+
+        // Everything above is read-only. Remove a stale legacy task only after preflight succeeds.
+        await system.DeleteOneShotTaskAsync(cancellationToken);
         var transaction = NewTransaction(state.CurrentMode, target);
         var operationId = transaction.Id;
         progress?.Report(new(operationId, 0, $"Preparing {target} Mode…"));
-        var previousPowerPlan = state.PreviousPowerPlan ?? await system.GetActivePowerPlanAsync(cancellationToken);
-        var baseline = state.ChangedServices.Count == 0 && state.CurrentMode == MachineMode.Normal
-            ? await CaptureGamingServicesAsync(cancellationToken) : state.ChangedServices;
         state = state with { Transaction = transaction, ChangedServices = baseline, LastError = null };
         await stateStore.SaveAsync(state, cancellationToken);
         progress?.Report(new(operationId, 20, "Baseline secured"));
@@ -41,13 +55,14 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
         {
             if (target == MachineMode.Gaming)
             {
-                await ApplyGamingAsync(operationId, cancellationToken);
+                await ApplyGamingAsync(operationId, capabilities, installedPowerPlans, cancellationToken);
             }
             else
             {
                 await RestoreCapturedServicesAsync(state, cancellationToken);
                 progress?.Report(new(operationId, 40, $"{target} services restored"));
-                await ApplyNonGamingPowerPlanAsync(target, state.PreviousPowerPlan, cancellationToken);
+                await ApplyNonGamingPowerPlanAsync(target, state.PreviousPowerPlan, installedPowerPlans,
+                    cancellationToken);
                 progress?.Report(new(operationId, 60, $"{target} power configuration applied"));
                 _ = await system.GetActivePowerPlanAsync(cancellationToken);
                 progress?.Report(new(operationId, 80, $"Verifying {target} Mode…", true));
@@ -156,12 +171,18 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
         {
             if (target == MachineMode.Gaming)
             {
-                await ApplyGamingAsync(transaction.Id, cancellationToken);
+                var capabilities = await DetectCapabilitiesSafeAsync(cancellationToken);
+                var installedPowerPlans = await DetectInstalledPowerPlansAsync(state.PreviousPowerPlan,
+                    cancellationToken);
+                await ApplyGamingAsync(transaction.Id, capabilities, installedPowerPlans, cancellationToken);
             }
             else
             {
                 await RestoreCapturedServicesAsync(state, cancellationToken);
-                await ApplyNonGamingPowerPlanAsync(target, state.PreviousPowerPlan, cancellationToken);
+                var installedPowerPlans = await DetectInstalledPowerPlansAsync(state.PreviousPowerPlan,
+                    cancellationToken);
+                await ApplyNonGamingPowerPlanAsync(target, state.PreviousPowerPlan, installedPowerPlans,
+                    cancellationToken);
             }
 
             await system.DeleteOneShotTaskAsync(cancellationToken);
@@ -266,10 +287,9 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
         return snapshots;
     }
 
-    private async Task ApplyGamingAsync(string operationId, CancellationToken cancellationToken)
+    private async Task ApplyGamingAsync(string operationId, MachineCapabilities capabilities,
+        IReadOnlySet<string> installedPowerPlans, CancellationToken cancellationToken)
     {
-        await system.DelayAsync(ModePolicy.GamingSettleDelay, cancellationToken);
-
         // Suppress SCM-level auto-restart for services whose recovery actions would otherwise
         // fight the cleanup-verification loop below (e.g. WSearch's default 5x RESTART actions),
         // BEFORE stopping them. This prevents the restart at the SCM level instead of racing it.
@@ -300,7 +320,10 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
 
         for (var attempt = 1; attempt <= ModePolicy.GamingCleanupAttempts; attempt++)
         {
-            await system.ShutdownWslAsync(cancellationToken);
+            if (capabilities.DevelopmentTools.Contains("WSL", StringComparer.OrdinalIgnoreCase))
+            {
+                await system.ShutdownWslAsync(cancellationToken);
+            }
             safetySkippedServices.Clear();
 
             foreach (var service in ModePolicy.GamingSuppressibleServices)
@@ -332,17 +355,26 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
 
             foreach (var process in ModePolicy.GamingSuppressibleProcesses)
             {
-                await system.StopProcessAsync(process, cancellationToken: cancellationToken);
+                if (await system.IsProcessRunningAsync(process, cancellationToken: cancellationToken))
+                {
+                    await system.StopProcessAsync(process, cancellationToken: cancellationToken);
+                }
             }
 
             foreach (var process in ModePolicy.GamingBestEffortProcesses)
             {
-                await system.StopProcessAsync(process, cancellationToken: cancellationToken);
+                if (await system.IsProcessRunningAsync(process, cancellationToken: cancellationToken))
+                {
+                    await system.StopProcessAsync(process, cancellationToken: cancellationToken);
+                }
             }
 
             foreach (var process in ModePolicy.GamingSuppressibleBackgroundProcesses)
             {
-                await system.StopProcessAsync(process, backgroundOnly: true, cancellationToken);
+                if (await system.IsProcessRunningAsync(process, backgroundOnly: true, cancellationToken))
+                {
+                    await system.StopProcessAsync(process, backgroundOnly: true, cancellationToken);
+                }
             }
             progress?.Report(new(operationId, 60, "Gaming processes cleaned"));
 
@@ -381,9 +413,15 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
                 $"Surviving processes: {FormatNames(survivingProcesses)}.");
         }
 
-        if (await system.PowerPlanExistsAsync(ModePolicy.GamingPowerPlan, cancellationToken))
+        var gamingPlan = ModePolicy.GamingPowerPlanCandidates.FirstOrDefault(installedPowerPlans.Contains);
+        if (gamingPlan is not null)
         {
-            await system.SetPowerPlanAsync(ModePolicy.GamingPowerPlan, cancellationToken);
+            await system.SetPowerPlanAsync(gamingPlan, cancellationToken);
+            log?.Invoke($"Selected installed Gaming power plan {gamingPlan}.");
+        }
+        else
+        {
+            log?.Invoke("No supported Gaming power-plan candidate is installed; preserving the active plan.");
         }
         progress?.Report(new(operationId, 80, "Verifying Gaming Mode…", true));
     }
@@ -449,6 +487,44 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
         return surviving;
     }
 
+    private async Task<MachineCapabilities> DetectCapabilitiesSafeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await system.DetectCapabilitiesAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            log?.Invoke($"Capability preflight was unavailable and optional capabilities will be treated as absent: " +
+                $"{exception.GetType().Name}: {exception.Message}");
+            return MachineCapabilities.Empty;
+        }
+    }
+
+    private async Task<IReadOnlySet<string>> DetectInstalledPowerPlansAsync(string? previousPowerPlan,
+        CancellationToken cancellationToken)
+    {
+        var candidates = ModePolicy.GamingPowerPlanCandidates
+            .Concat(ModePolicy.ProgrammingPowerPlanCandidates)
+            .Concat([ModePolicy.AmdBalancedPowerPlan, ModePolicy.WindowsBalancedPowerPlan])
+            .Concat(string.IsNullOrWhiteSpace(previousPowerPlan) ? [] : [previousPowerPlan])
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        var installed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var candidate in candidates)
+        {
+            if (await system.PowerPlanExistsAsync(candidate, cancellationToken))
+            {
+                installed.Add(candidate);
+            }
+        }
+
+        return installed;
+    }
+
     private static string FormatNames(IEnumerable<string> names)
     {
         var values = names.Order(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -487,24 +563,25 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
     }
 
     private async Task ApplyNonGamingPowerPlanAsync(MachineMode target, string? previousPowerPlan,
-        CancellationToken cancellationToken)
+        IReadOnlySet<string> installedPowerPlans, CancellationToken cancellationToken)
     {
         IEnumerable<string> candidates = target == MachineMode.Programming
-            ? new[] { ModePolicy.GamingPowerPlan, ModePolicy.AmdBalancedPowerPlan, ModePolicy.WindowsBalancedPowerPlan }
+            ? ModePolicy.ProgrammingPowerPlanCandidates
             : new[] { previousPowerPlan, ModePolicy.AmdBalancedPowerPlan, ModePolicy.WindowsBalancedPowerPlan }
                 .Where(candidate => !string.IsNullOrWhiteSpace(candidate))
                 .Cast<string>();
 
         foreach (var candidate in candidates)
         {
-            if (await system.PowerPlanExistsAsync(candidate, cancellationToken))
+            if (installedPowerPlans.Contains(candidate))
             {
                 await system.SetPowerPlanAsync(candidate, cancellationToken);
+                log?.Invoke($"Selected installed {target} power plan {candidate}.");
                 return;
             }
         }
 
-        throw new InvalidOperationException("No supported power plan is installed.");
+        log?.Invoke($"No supported {target} power-plan candidate is installed; preserving the active plan.");
     }
 
     private async Task<ModeState> FailAsync(ModeState state, TransitionRecord transaction, Exception exception,

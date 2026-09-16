@@ -35,8 +35,8 @@ public sealed class ModeOrchestratorTests
         Assert.Contains("WSearch", system.StoppedServices);
         Assert.Contains("Kudu", system.StoppedProcesses);
         Assert.Equal(1, system.WslShutdownCount);
-        Assert.Equal([ModePolicy.GamingSettleDelay, ModePolicy.GamingVerificationRetryDelay,
-            ModePolicy.GamingCleanVerificationDelay], system.Delays);
+        Assert.Equal([ModePolicy.GamingVerificationRetryDelay, ModePolicy.GamingCleanVerificationDelay],
+            system.Delays);
         Assert.Equal(ModePolicy.GamingPowerPlan, system.ActivePlan);
         Assert.False(system.TaskPresent);
         Assert.Equal(MachineMode.Gaming, result.DesiredMode);
@@ -162,8 +162,8 @@ public sealed class ModeOrchestratorTests
         Assert.Equal(2, system.StoppedProcesses.Count(name => name == "Kudu"));
         Assert.DoesNotContain("vmmemWSL", system.StoppedProcesses);
         Assert.Equal(2, system.WslShutdownCount);
-        Assert.Equal([ModePolicy.GamingSettleDelay, ModePolicy.GamingVerificationRetryDelay,
-            ModePolicy.GamingVerificationRetryDelay, ModePolicy.GamingCleanVerificationDelay], system.Delays);
+        Assert.Equal([ModePolicy.GamingVerificationRetryDelay, ModePolicy.GamingVerificationRetryDelay,
+            ModePolicy.GamingCleanVerificationDelay], system.Delays);
         Assert.Contains(logs, message => message.Contains("verification 1/3") && message.Contains("Kudu"));
         Assert.Contains(logs, message => message.Contains("verification 2/3") && message.Contains("surviving processes=none"));
     }
@@ -559,8 +559,8 @@ public sealed class ModeOrchestratorTests
 
         Assert.Equal(MachineMode.Gaming, applied.CurrentMode);
         Assert.True(applied.Transaction?.Completed);
-        Assert.Equal([ModePolicy.GamingSettleDelay, ModePolicy.GamingVerificationRetryDelay,
-            ModePolicy.GamingCleanVerificationDelay], system.Delays);
+        Assert.Equal([ModePolicy.GamingVerificationRetryDelay, ModePolicy.GamingCleanVerificationDelay],
+            system.Delays);
         Assert.False(system.TaskPresent);
         Assert.Equal(1, system.TaskDeleteCount);
     }
@@ -861,7 +861,7 @@ public sealed class ModeOrchestratorTests
 
     private static FakeSystem SystemWithPlans()
     {
-        var system = new FakeSystem();
+        var system = new FakeSystem { Capabilities = new MachineCapabilities([], ["WSL"]) };
         system.Plans.Add(ModePolicy.GamingPowerPlan);
         system.Plans.Add(ModePolicy.AmdBalancedPowerPlan);
         system.Plans.Add(ModePolicy.WindowsBalancedPowerPlan);

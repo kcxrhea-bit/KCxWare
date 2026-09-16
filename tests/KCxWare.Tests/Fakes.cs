@@ -60,6 +60,8 @@ internal sealed class SequencedRunner(params CommandResult[] results) : ICommand
 internal sealed class FakeSystem : ISystemController
 {
     public string CurrentSessionId { get; set; } = "test-session";
+    public MachineCapabilities Capabilities { get; set; } = MachineCapabilities.Empty;
+    public int CapabilityDetectionCount { get; private set; }
     public Dictionary<string, bool> Services { get; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, int> ServiceRestartsRemaining { get; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, bool> ServiceCanStopSafely { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -91,6 +93,11 @@ internal sealed class FakeSystem : ISystemController
     public int TaskDeleteCount { get; private set; }
     public int WslShutdownCount { get; private set; }
 
+    public Task<MachineCapabilities> DetectCapabilitiesAsync(CancellationToken cancellationToken = default)
+    {
+        CapabilityDetectionCount++;
+        return Task.FromResult(Capabilities);
+    }
     public Task<string?> GetActivePowerPlanAsync(CancellationToken cancellationToken = default) => Task.FromResult(ActivePlan);
     public Task<bool> PowerPlanExistsAsync(string planId, CancellationToken cancellationToken = default) => Task.FromResult(Plans.Contains(planId));
     public Task SetPowerPlanAsync(string planId, CancellationToken cancellationToken = default) { ActivePlan = planId; return Task.CompletedTask; }
@@ -201,7 +208,9 @@ internal sealed class FakeSystem : ISystemController
             // (empty action list), SCM no longer auto-restarts it, so the simulated respawn
             // driven by *RestartsRemaining/*RespawnsRemaining must not fire either.
             if (ModePolicy.RecoverySuppressedServices.Contains(name) &&
-                FailureActionsConfigured.TryGetValue(name, out var config) && config.Actions.Count == 0)
+                FailureActionsConfigured.TryGetValue(name, out var config) &&
+                (config.Actions.Count == 0 ||
+                 config.Actions is [{ Type: ServiceFailureActionType.None, DelayMs: 0 }]))
             {
                 continue;
             }

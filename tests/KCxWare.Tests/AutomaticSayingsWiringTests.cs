@@ -214,7 +214,7 @@ public sealed class AutomaticSayingsWiringTests
 
     private static FakeSystem SystemWithPlans()
     {
-        var system = new FakeSystem();
+        var system = new FakeSystem { Capabilities = new MachineCapabilities([], ["WSL"]) };
         system.Plans.Add(ModePolicy.GamingPowerPlan);
         system.Plans.Add(ModePolicy.AmdBalancedPowerPlan);
         system.Plans.Add(ModePolicy.WindowsBalancedPowerPlan);
