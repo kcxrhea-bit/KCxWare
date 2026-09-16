@@ -312,6 +312,22 @@ public sealed class ModeOrchestratorTests
     }
 
     [Fact]
+    public async Task GamingCleanup_AcceptsScmExplicitNoneSuppressionReadback()
+    {
+        var store = new MemoryStateStore(new ModeState());
+        var system = SystemWithPlans();
+        system.Services["WSearch"] = true;
+        system.NormalizeSuppressionToExplicitNone = true;
+
+        var result = await new ModeOrchestrator(store, system).ApplyLiveAsync(MachineMode.Gaming);
+
+        Assert.Equal(MachineMode.Gaming, result.CurrentMode);
+        Assert.Contains("stop-service:WSearch", system.Operations);
+        Assert.Equal(ServiceFailureActionType.None,
+            system.FailureActionsConfigured["WSearch"].Actions.Single().Type);
+    }
+
+    [Fact]
     public async Task GamingToNormal_RestoresCapturedFailureActionsFlagAlongsideActions()
     {
         var store = new MemoryStateStore(new ModeState());

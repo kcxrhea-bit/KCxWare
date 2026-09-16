@@ -78,6 +78,7 @@ internal sealed class FakeSystem : ISystemController
     /// post-suppression readback catches it instead of trusting the Set call blindly.
     /// </summary>
     public HashSet<string> SuppressionIneffectiveFor { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public bool NormalizeSuppressionToExplicitNone { get; set; }
     public HashSet<string> Plans { get; } = new(StringComparer.OrdinalIgnoreCase);
     public List<string> StoppedServices { get; } = [];
     public List<string> StartedServices { get; } = [];
@@ -137,7 +138,9 @@ internal sealed class FakeSystem : ISystemController
             return Task.CompletedTask;
         }
 
-        FailureActionsConfigured[name] = config;
+        FailureActionsConfigured[name] = suppressing && NormalizeSuppressionToExplicitNone
+            ? config with { Actions = [new ServiceFailureAction(ServiceFailureActionType.None, 0)] }
+            : config;
         return Task.CompletedTask;
     }
     public Task<bool> IsProcessRunningAsync(string name, bool backgroundOnly = false,

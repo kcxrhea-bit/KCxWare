@@ -287,7 +287,7 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
             var effective = await system.GetServiceFailureActionsAsync(service, cancellationToken);
             log?.Invoke($"Post-suppression readback for {service}: action count={effective.Actions.Count}, " +
                 $"types={string.Join(",", effective.Actions.Select(action => action.Type))}.");
-            if (effective.Actions.Count != 0)
+            if (!IsRecoveryPolicySuppressed(effective))
             {
                 throw new InvalidOperationException("WSearch recovery-policy suppression could not be verified.");
             }
@@ -454,6 +454,11 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
         var values = names.Order(StringComparer.OrdinalIgnoreCase).ToArray();
         return values.Length == 0 ? "none" : string.Join(", ", values);
     }
+
+    private static bool IsRecoveryPolicySuppressed(ServiceFailureActionsConfig config) =>
+        !config.ActionsOnNonCrashFailures &&
+        (config.Actions.Count == 0 ||
+         config.Actions is [{ Type: ServiceFailureActionType.None, DelayMs: 0 }]);
 
     private async Task RestoreCapturedServicesAsync(ModeState state, CancellationToken cancellationToken)
     {
