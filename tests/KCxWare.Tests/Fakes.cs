@@ -67,6 +67,9 @@ internal sealed class FakeSystem : ISystemController
     public Dictionary<string, int> ProcessRestartsRemaining { get; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, int> ServiceCleanWindowRespawnsRemaining { get; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, int> ProcessCleanWindowRespawnsRemaining { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, ServiceFailureActionsConfig> FailureActionsConfigured { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public List<string> FailureActionsSuppressedCalls { get; } = [];
+    public List<string> FailureActionsRestoredCalls { get; } = [];
     public HashSet<string> Plans { get; } = new(StringComparer.OrdinalIgnoreCase);
     public List<string> StoppedServices { get; } = [];
     public List<string> StartedServices { get; } = [];
@@ -99,6 +102,26 @@ internal sealed class FakeSystem : ISystemController
         return Task.CompletedTask;
     }
     public Task StartServiceAsync(string name, CancellationToken cancellationToken = default) { Services[name] = true; StartedServices.Add(name); return Task.CompletedTask; }
+    public Task<ServiceFailureActionsConfig> GetServiceFailureActionsAsync(string name, CancellationToken cancellationToken = default)
+    {
+        if (FailureActionsConfigured.TryGetValue(name, out var existing))
+        {
+            return Task.FromResult(existing);
+        }
+
+        // Simulates the real default WSearch SCM configuration observed in production:
+        // RESET_PERIOD 86400, 5x RESTART after 30000 ms.
+        var defaultConfig = new ServiceFailureActionsConfig(86400, null, null,
+            Enumerable.Repeat(new ServiceFailureAction(ServiceFailureActionType.RestartService, 30000), 5).ToList());
+        FailureActionsConfigured[name] = defaultConfig;
+        return Task.FromResult(defaultConfig);
+    }
+    public Task SetServiceFailureActionsAsync(string name, ServiceFailureActionsConfig config, CancellationToken cancellationToken = default)
+    {
+        FailureActionsConfigured[name] = config;
+        (config.Actions.Count == 0 ? FailureActionsSuppressedCalls : FailureActionsRestoredCalls).Add(name);
+        return Task.CompletedTask;
+    }
     public Task<bool> IsProcessRunningAsync(string name, bool backgroundOnly = false,
         CancellationToken cancellationToken = default) =>
         Task.FromResult(Processes.TryGetValue(name, out var running) && running);
@@ -144,11 +167,20 @@ internal sealed class FakeSystem : ISystemController
     public Task<bool> IsOneShotTaskPresentAsync(CancellationToken cancellationToken = default) => Task.FromResult(TaskPresent);
     public Task DeleteOneShotTaskAsync(CancellationToken cancellationToken = default) { TaskPresent = false; TaskDeleteCount++; return Task.CompletedTask; }
 
-    private static void Respawn(Dictionary<string, int> remainingByName, Dictionary<string, bool> states)
+    private void Respawn(Dictionary<string, int> remainingByName, Dictionary<string, bool> states)
     {
         foreach (var name in remainingByName.Keys.ToArray())
         {
             if (remainingByName[name] <= 0)
+            {
+                continue;
+            }
+
+            // Mirrors real SCM behavior: once a service's recovery actions are suppressed
+            // (empty action list), SCM no longer auto-restarts it, so the simulated respawn
+            // driven by *RestartsRemaining/*RespawnsRemaining must not fire either.
+            if (ModePolicy.RecoverySuppressedServices.Contains(name) &&
+                FailureActionsConfigured.TryGetValue(name, out var config) && config.Actions.Count == 0)
             {
                 continue;
             }

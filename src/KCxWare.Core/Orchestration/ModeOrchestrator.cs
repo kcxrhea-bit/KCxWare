@@ -243,10 +243,21 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
         foreach (var service in ModePolicy.GamingSuppressibleServices)
         {
             var running = await system.IsServiceRunningAsync(service, cancellationToken);
-            if (running.HasValue)
+            if (!running.HasValue)
             {
-                snapshots.Add(new ServiceSnapshot(service, running.Value));
+                continue;
             }
+
+            ServiceFailureActionsConfig? failureActions = null;
+            if (ModePolicy.RecoverySuppressedServices.Contains(service))
+            {
+                // Captured durably as part of the transactional baseline before anything is
+                // changed, so a crash mid-transition still leaves the exact original SCM
+                // recovery configuration recoverable via safe recovery / boot normalization.
+                failureActions = await system.GetServiceFailureActionsAsync(service, cancellationToken);
+            }
+
+            snapshots.Add(new ServiceSnapshot(service, running.Value, failureActions));
         }
 
         return snapshots;
@@ -255,6 +266,14 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
     private async Task ApplyGamingAsync(string operationId, CancellationToken cancellationToken)
     {
         await system.DelayAsync(ModePolicy.GamingSettleDelay, cancellationToken);
+
+        // Suppress SCM-level auto-restart for services whose recovery actions would otherwise
+        // fight the cleanup-verification loop below (e.g. WSearch's default 5x RESTART actions),
+        // BEFORE stopping them. This prevents the restart at the SCM level instead of racing it.
+        foreach (var service in ModePolicy.RecoverySuppressedServices)
+        {
+            await system.SetServiceFailureActionsAsync(service, ServiceFailureActionsConfig.NoRecovery, cancellationToken);
+        }
 
         var safetySkippedServices = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         IReadOnlyList<string> survivingServices = [];
@@ -415,9 +434,18 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
 
     private async Task RestoreCapturedServicesAsync(ModeState state, CancellationToken cancellationToken)
     {
-        foreach (var snapshot in state.ChangedServices.Where(snapshot => snapshot.WasRunning))
+        foreach (var snapshot in state.ChangedServices)
         {
-            if (await system.IsServiceRunningAsync(snapshot.Name, cancellationToken) == false)
+            if (snapshot.FailureActions is not null)
+            {
+                // Restore the exact captured SCM recovery configuration - not a default, not a
+                // hardcoded guess - before touching the service's running state. This is the same
+                // path used by Normal restoration, Programming, safe recovery, interrupted-transition
+                // recovery, and boot normalization, since they all funnel through this method.
+                await system.SetServiceFailureActionsAsync(snapshot.Name, snapshot.FailureActions, cancellationToken);
+            }
+
+            if (snapshot.WasRunning && await system.IsServiceRunningAsync(snapshot.Name, cancellationToken) == false)
             {
                 await system.StartServiceAsync(snapshot.Name, cancellationToken);
             }

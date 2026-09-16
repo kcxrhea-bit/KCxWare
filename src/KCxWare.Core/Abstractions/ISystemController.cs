@@ -1,3 +1,5 @@
+using KCxWare.Core.Models;
+
 namespace KCxWare.Core.Abstractions;
 
 public interface ISystemController
@@ -10,6 +12,8 @@ public interface ISystemController
     Task<bool> CanStopServiceSafelyAsync(string name, CancellationToken cancellationToken = default);
     Task StopServiceAsync(string name, CancellationToken cancellationToken = default);
     Task StartServiceAsync(string name, CancellationToken cancellationToken = default);
+    Task<ServiceFailureActionsConfig> GetServiceFailureActionsAsync(string name, CancellationToken cancellationToken = default);
+    Task SetServiceFailureActionsAsync(string name, ServiceFailureActionsConfig config, CancellationToken cancellationToken = default);
     Task<bool> IsProcessRunningAsync(string name, bool backgroundOnly = false,
         CancellationToken cancellationToken = default);
     Task StopProcessAsync(string name, bool backgroundOnly = false, CancellationToken cancellationToken = default);

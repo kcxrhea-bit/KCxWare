@@ -1,6 +1,6 @@
 namespace KCxWare.Core.Models;
 
-public sealed record ServiceSnapshot(string Name, bool WasRunning);
+public sealed record ServiceSnapshot(string Name, bool WasRunning, ServiceFailureActionsConfig? FailureActions = null);
 
 public sealed record TransitionRecord(
     string Id,

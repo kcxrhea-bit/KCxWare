@@ -44,6 +44,14 @@ public static class ModePolicy
         "PhoneExperienceHost", "CrossDeviceService", "CrossDeviceResume"
     ];
 
+    /// <summary>
+    /// Services in <see cref="GamingSuppressibleServices"/> whose SCM failure/recovery-action
+    /// configuration KCxWare must temporarily suppress before stopping them, because Windows
+    /// Service Control Manager otherwise auto-restarts them mid-cleanup-verification regardless of
+    /// how cleanly KCxWare stopped the service. WSearch ships with 5x RESTART recovery actions.
+    /// </summary>
+    public static IReadOnlyList<string> RecoverySuppressedServices { get; } = ["WSearch"];
+
     public static IReadOnlyList<string> GamingSuppressibleBackgroundProcesses { get; } = ["msedge"];
     public static IReadOnlyList<string> GamingShutdownVerifiedProcesses { get; } = ["vmmemWSL"];
 
@@ -64,6 +72,18 @@ public static class ModePolicy
         if (overlap.Length != 0)
         {
             throw new InvalidOperationException($"Protected services appear in the suppressible policy: {string.Join(", ", overlap)}");
+        }
+
+        var recoveryOverlap = RecoverySuppressedServices.Where(ProtectedServices.Contains).ToArray();
+        if (recoveryOverlap.Length != 0)
+        {
+            throw new InvalidOperationException($"Protected services appear in the recovery-suppression policy: {string.Join(", ", recoveryOverlap)}");
+        }
+
+        var recoveryNotSuppressible = RecoverySuppressedServices.Where(service => !GamingSuppressibleServices.Contains(service)).ToArray();
+        if (recoveryNotSuppressible.Length != 0)
+        {
+            throw new InvalidOperationException($"Recovery-suppression policy references services outside the suppressible policy: {string.Join(", ", recoveryNotSuppressible)}");
         }
 
         var processOverlap = GamingSuppressibleProcesses

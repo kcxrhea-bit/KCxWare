@@ -227,7 +227,6 @@ public sealed class ModeOrchestratorTests
     [InlineData("SaladBowl")]
     [InlineData("WslService")]
     [InlineData("vmcompute")]
-    [InlineData("WSearch")]
     public async Task GamingCleanup_RetriesServiceWhenItRespawnsDuringCleanWindow(string service)
     {
         var store = new MemoryStateStore(Armed(MachineMode.GamingArmed, MachineMode.Gaming, []));
@@ -241,6 +240,204 @@ public sealed class ModeOrchestratorTests
         Assert.Equal(2, system.StoppedServices.Count(name => name.Equals(service,
             StringComparison.OrdinalIgnoreCase)));
         Assert.False(system.Services[service]);
+    }
+
+    [Fact]
+    public async Task GamingCleanup_CapturesWSearchRecoveryConfigBeforeChangingIt()
+    {
+        var store = new MemoryStateStore(new ModeState());
+        var system = SystemWithPlans();
+        system.Services["WSearch"] = true;
+
+        var result = await new ModeOrchestrator(store, system).ApplyLiveAsync(MachineMode.Gaming);
+
+        Assert.Equal(MachineMode.Gaming, result.CurrentMode);
+        var snapshot = Assert.Single(result.ChangedServices, service => service.Name == "WSearch");
+        Assert.NotNull(snapshot.FailureActions);
+        Assert.Equal(5, snapshot.FailureActions!.Actions.Count);
+        Assert.All(snapshot.FailureActions.Actions,
+            action => Assert.Equal(ServiceFailureActionType.RestartService, action.Type));
+    }
+
+    [Fact]
+    public async Task GamingCleanup_SuppressesWSearchRecoveryBeforeStoppingIt()
+    {
+        var store = new MemoryStateStore(new ModeState());
+        var system = SystemWithPlans();
+        system.Services["WSearch"] = true;
+
+        await new ModeOrchestrator(store, system).ApplyLiveAsync(MachineMode.Gaming);
+
+        Assert.Contains("WSearch", system.FailureActionsSuppressedCalls);
+        Assert.Contains("stop-service:WSearch", system.Operations);
+        Assert.Empty(system.FailureActionsConfigured["WSearch"].Actions);
+    }
+
+    [Fact]
+    public async Task GamingCleanup_RealWSearchSurvivorStillFailsVerification()
+    {
+        var store = new MemoryStateStore(new ModeState());
+        var system = SystemWithPlans();
+        system.Services["WSearch"] = true;
+        // Simulates a genuine survivor (service never actually reaches STOPPED), unrelated to SCM
+        // recovery-action suppression - the fix must not mask a real cleanup failure.
+        system.ServiceRestartsRemaining["WSearch"] = ModePolicy.GamingCleanupAttempts;
+
+        var result = await new ModeOrchestrator(store, system).ApplyLiveAsync(MachineMode.Gaming);
+
+        Assert.Equal(MachineMode.RecoveryRequired, result.CurrentMode);
+        Assert.Contains("WSearch", result.LastError);
+    }
+
+    [Fact]
+    public async Task GamingToNormal_RestoresExactCapturedWSearchRecoveryConfig()
+    {
+        var store = new MemoryStateStore(new ModeState());
+        var system = SystemWithPlans();
+        system.Services["WSearch"] = true;
+        var orchestrator = new ModeOrchestrator(store, system);
+
+        var gaming = await orchestrator.ApplyLiveAsync(MachineMode.Gaming);
+        var capturedConfig = gaming.ChangedServices.Single(service => service.Name == "WSearch").FailureActions;
+        Assert.NotNull(capturedConfig);
+        Assert.Empty(system.FailureActionsConfigured["WSearch"].Actions); // suppressed while Gaming
+
+        var normal = await orchestrator.ApplyLiveAsync(MachineMode.Normal);
+
+        Assert.Equal(MachineMode.Normal, normal.CurrentMode);
+        Assert.Contains("WSearch", system.FailureActionsRestoredCalls);
+        Assert.Equal(capturedConfig, system.FailureActionsConfigured["WSearch"]);
+        Assert.Equal(5, system.FailureActionsConfigured["WSearch"].Actions.Count);
+        Assert.Contains("WSearch", system.StartedServices);
+    }
+
+    [Fact]
+    public async Task SafeRecovery_RestoresCapturedWSearchRecoveryConfig()
+    {
+        var initial = new ModeState
+        {
+            CurrentMode = MachineMode.RecoveryRequired,
+            DesiredMode = MachineMode.Gaming,
+            LastError = "simulated interrupted transition",
+            ChangedServices =
+            [
+                new ServiceSnapshot("WSearch", true,
+                    new ServiceFailureActionsConfig(86400, null, null,
+                        [new ServiceFailureAction(ServiceFailureActionType.RestartService, 30000)]))
+            ]
+        };
+        var store = new MemoryStateStore(initial);
+        var system = SystemWithPlans();
+        system.Services["WSearch"] = false;
+        // Simulate the service currently sitting in the suppressed state left over from the
+        // interrupted Gaming transition.
+        system.FailureActionsConfigured["WSearch"] = ServiceFailureActionsConfig.NoRecovery;
+
+        var result = await new ModeOrchestrator(store, system).RecoverAsync();
+
+        Assert.Equal(MachineMode.Normal, result.CurrentMode);
+        Assert.Contains("WSearch", system.FailureActionsRestoredCalls);
+        Assert.Single(system.FailureActionsConfigured["WSearch"].Actions);
+        Assert.Contains("WSearch", system.StartedServices);
+    }
+
+    [Fact]
+    public async Task InterruptedTransition_IsFlaggedForRecoveryAndRestoresWSearchConfig()
+    {
+        var interrupted = new ModeState
+        {
+            CurrentMode = MachineMode.Gaming,
+            DesiredMode = MachineMode.Gaming,
+            ChangedServices =
+            [
+                new ServiceSnapshot("WSearch", true,
+                    new ServiceFailureActionsConfig(86400, null, null,
+                        [new ServiceFailureAction(ServiceFailureActionType.RestartService, 30000)]))
+            ],
+            Transaction = new TransitionRecord("tx-1", MachineMode.Normal, MachineMode.Gaming,
+                DateTimeOffset.UtcNow, false)
+        };
+        var store = new MemoryStateStore(interrupted);
+        var loaded = await store.LoadAsync();
+        Assert.Equal(MachineMode.Gaming, loaded.CurrentMode); // MemoryStateStore doesn't reinterpret; JsonStateStore does.
+
+        var system = SystemWithPlans();
+        system.Services["WSearch"] = false;
+        system.FailureActionsConfigured["WSearch"] = ServiceFailureActionsConfig.NoRecovery;
+
+        var result = await new ModeOrchestrator(store, system).RecoverAsync();
+
+        Assert.Equal(MachineMode.Normal, result.CurrentMode);
+        Assert.Contains("WSearch", system.FailureActionsRestoredCalls);
+        Assert.Single(system.FailureActionsConfigured["WSearch"].Actions);
+    }
+
+    [Fact]
+    public async Task BootNormalization_RestoresWSearchRecoveryConfigForStaleSession()
+    {
+        var initial = new ModeState
+        {
+            CurrentMode = MachineMode.Gaming,
+            DesiredMode = MachineMode.Gaming,
+            SessionId = "old-session",
+            ChangedServices =
+            [
+                new ServiceSnapshot("WSearch", true,
+                    new ServiceFailureActionsConfig(86400, null, null,
+                        [new ServiceFailureAction(ServiceFailureActionType.RestartService, 30000)]))
+            ]
+        };
+        var store = new MemoryStateStore(initial);
+        var system = SystemWithPlans();
+        system.CurrentSessionId = "new-session";
+        system.Services["WSearch"] = false;
+        system.FailureActionsConfigured["WSearch"] = ServiceFailureActionsConfig.NoRecovery;
+
+        var result = await new ModeOrchestrator(store, system).NormalizeAfterBootAsync();
+
+        Assert.Equal(MachineMode.Normal, result.CurrentMode);
+        Assert.Contains("WSearch", system.FailureActionsRestoredCalls);
+        Assert.Single(system.FailureActionsConfigured["WSearch"].Actions);
+    }
+
+    [Fact]
+    public async Task ProgrammingTransition_DoesNotLeaveWSearchSuppressionBehind()
+    {
+        var store = new MemoryStateStore(new ModeState
+        {
+            CurrentMode = MachineMode.Gaming,
+            DesiredMode = MachineMode.Gaming,
+            ChangedServices =
+            [
+                new ServiceSnapshot("WSearch", true,
+                    new ServiceFailureActionsConfig(86400, null, null,
+                        [new ServiceFailureAction(ServiceFailureActionType.RestartService, 30000)]))
+            ]
+        });
+        var system = SystemWithPlans();
+        system.Services["WSearch"] = false;
+        system.FailureActionsConfigured["WSearch"] = ServiceFailureActionsConfig.NoRecovery;
+
+        var result = await new ModeOrchestrator(store, system).ApplyLiveAsync(MachineMode.Programming);
+
+        Assert.Equal(MachineMode.Programming, result.CurrentMode);
+        Assert.Contains("WSearch", system.FailureActionsRestoredCalls);
+        Assert.Single(system.FailureActionsConfigured["WSearch"].Actions);
+    }
+
+    [Fact]
+    public async Task GamingCleanup_NeverTouchesOtherServicesRecoveryConfig()
+    {
+        var store = new MemoryStateStore(new ModeState());
+        var system = SystemWithPlans();
+        system.Services["WSearch"] = true;
+        system.Services["DoSvc"] = true;
+
+        await new ModeOrchestrator(store, system).ApplyLiveAsync(MachineMode.Gaming);
+
+        Assert.DoesNotContain("DoSvc", system.FailureActionsSuppressedCalls);
+        Assert.DoesNotContain("DoSvc", system.FailureActionsRestoredCalls);
+        Assert.False(system.FailureActionsConfigured.ContainsKey("DoSvc"));
     }
 
     [Fact]

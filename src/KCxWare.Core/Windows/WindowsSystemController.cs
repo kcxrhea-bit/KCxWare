@@ -1,12 +1,24 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using KCxWare.Core.Abstractions;
+using KCxWare.Core.Models;
 using KCxWare.Core.Policies;
 
 namespace KCxWare.Core.Windows;
 
-public sealed partial class WindowsSystemController(ICommandRunner runner) : ISystemController
+public sealed partial class WindowsSystemController(ICommandRunner runner,
+    IServiceRecoveryPolicyStore? recoveryPolicyStore = null) : ISystemController
 {
+    private readonly IServiceRecoveryPolicyStore _recoveryPolicyStore =
+        recoveryPolicyStore ?? new ServiceRecoveryPolicyStore();
+
+    public Task<ServiceFailureActionsConfig> GetServiceFailureActionsAsync(string name,
+        CancellationToken cancellationToken = default) =>
+        _recoveryPolicyStore.GetFailureActionsAsync(name, cancellationToken);
+
+    public Task SetServiceFailureActionsAsync(string name, ServiceFailureActionsConfig config,
+        CancellationToken cancellationToken = default) =>
+        _recoveryPolicyStore.SetFailureActionsAsync(name, config, cancellationToken);
     public string CurrentSessionId => Environment.TickCount64.ToString(System.Globalization.CultureInfo.InvariantCulture);
     public async Task<string?> GetActivePowerPlanAsync(CancellationToken cancellationToken = default)
     {
