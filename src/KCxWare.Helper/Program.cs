@@ -25,7 +25,8 @@ internal static class HelperProgram
         {
             if (args.Length == 0)
             {
-                throw new ArgumentException("Expected apply-live, normalize-after-boot, recover, or cancel.");
+                throw new ArgumentException(
+                    "Expected apply-live, normalize-after-boot, apply-armed, recover, cancel, restart, or shutdown.");
             }
 
             var progressPipe = GetOption(args, "--progress");
@@ -56,6 +57,18 @@ internal static class HelperProgram
                 case "cancel":
                     await orchestrator.CancelArmedAsync();
                     WriteLog(logPath, "Armed transition cancelled.");
+                    break;
+
+                // Narrowly scoped power operations: no arbitrary command execution, shell
+                // parameters, scripts, or extra flags accepted - just the two validated,
+                // documented Windows power actions KCxWare is allowed to request, checked
+                // against the same allowlist KCxWare.Core.Windows.HelperCommandValidator
+                // exposes for testing. The caller (KCxWare.Core.Orchestration.PowerOrchestrator)
+                // has already restored and verified Normal mode before invoking either of these.
+                case "restart" or "shutdown" when HelperCommandValidator.IsValidPowerCommand(args):
+                    var isRestart = HelperCommandValidator.IsRestartCommand(args);
+                    WriteLog(logPath, isRestart ? "Requesting Windows restart." : "Requesting Windows shutdown.");
+                    RequestPowerAction(isRestart);
                     break;
 
                 default:
@@ -94,6 +107,27 @@ internal static class HelperProgram
             CreateNoWindow = true,
             ArgumentList = { "/r", "/t", "10", "/d", "p:0:0", "/c", reason }
         });
+    }
+
+    /// <summary>
+    /// Invokes the documented Windows shutdown.exe restart/shutdown action - no shell, no
+    /// user-supplied arguments, no force-close flag, so Windows' normal unsaved-work prompts are
+    /// preserved. This is the only place besides <see cref="Restart"/> that KCxWare.Helper is
+    /// allowed to request a real power action, and it accepts exactly two shapes (restart or
+    /// shutdown), nothing else.
+    /// </summary>
+    private static void RequestPowerAction(bool restart)
+    {
+        var startInfo = new ProcessStartInfo("shutdown.exe")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        startInfo.ArgumentList.Add(restart ? "/r" : "/s");
+        startInfo.ArgumentList.Add("/t");
+        startInfo.ArgumentList.Add("0");
+
+        Process.Start(startInfo);
     }
 
     private static void WriteLog(string path, string message)

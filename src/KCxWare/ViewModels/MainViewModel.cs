@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
+using KCxWare.Core.Abstractions;
 using KCxWare.Core.Loading;
 using KCxWare.Core.Models;
 using KCxWare.Core.Orchestration;
@@ -12,8 +13,8 @@ namespace KCxWare.ViewModels;
 
 public sealed class MainViewModel : INotifyPropertyChanged
 {
-    private readonly ModeOrchestrator _orchestrator =
-        new(new JsonStateStore(), new WindowsSystemController(new CommandRunner()));
+    private readonly JsonStateStore _stateStore = new();
+    private readonly ModeOrchestrator _orchestrator;
     private ModeState _state = new();
     private string _activePowerPlan = "Detecting…";
     private string _health = "CHECKING";
@@ -23,6 +24,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     /// <summary>Central loading coordinator shared by every async operation this window triggers.</summary>
     public LoadingCoordinator LoadingCoordinator { get; } = new();
+
+    /// <summary>
+    /// Coordinates the RESTART WINDOWS / SHUT DOWN WINDOWS safe-power-ordering contract. Shares
+    /// this view model's state store and mode orchestrator so restoration is the exact same
+    /// authoritative path used by "Run Safe Recovery" - not a second way to mutate mode state.
+    /// </summary>
+    public PowerOrchestrator PowerOrchestrator { get; }
 
     public string CurrentMode => FormatMode(_state.CurrentMode);
     public string ActivePowerPlan { get => _activePowerPlan; private set => SetField(ref _activePowerPlan, value); }
@@ -53,6 +61,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public MainViewModel()
     {
+        _orchestrator = new ModeOrchestrator(_stateStore, new WindowsSystemController(new CommandRunner()));
+        PowerOrchestrator = new PowerOrchestrator(_orchestrator, _stateStore, new HelperPowerActionInvoker(this));
         LoadingCoordinator.Changed += () => IsBusy = LoadingCoordinator.Current is not null;
     }
 
@@ -136,4 +146,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+    /// <summary>
+    /// Bridges <see cref="PowerOrchestrator"/> to the exact same elevated KCxWare.Helper/UAC
+    /// path already used for arm/apply-armed/recover/cancel - no separate elevation mechanism,
+    /// just the two additional validated helper commands "restart" and "shutdown".
+    /// </summary>
+    private sealed class HelperPowerActionInvoker(MainViewModel owner) : IPowerActionInvoker
+    {
+        public Task<int> InvokeAsync(PowerAction action, CancellationToken cancellationToken = default) =>
+            owner.RunElevatedAsync(action == PowerAction.Restart ? "restart" : "shutdown");
+    }
 }

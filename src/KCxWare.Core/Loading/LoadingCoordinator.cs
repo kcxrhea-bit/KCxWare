@@ -84,7 +84,8 @@ public sealed class LoadingCoordinator
         Raise();
     }
 
-    internal void Complete(string id, string? completionStatus)
+    internal void Complete(string id, string? completionStatus, string? completionTitle = null,
+        string? completionSubtitle = null)
     {
         lock (_sync)
         {
@@ -94,6 +95,8 @@ public sealed class LoadingCoordinator
             op.IsIndeterminate = false;
             op.Progress = 100;
             if (completionStatus is not null) op.Status = completionStatus;
+            if (completionTitle is not null) op.CompletionTitle = completionTitle;
+            if (completionSubtitle is not null) op.CompletionSubtitle = completionSubtitle;
         }
 
         Raise();
@@ -166,6 +169,17 @@ public sealed class LoadingHandle : IDisposable
     {
         _finished = true;
         _coordinator.Complete(_id, completionStatus);
+    }
+
+    /// <summary>
+    /// Completes the operation with a text-only completion/final-state screen (large title +
+    /// secondary sentence) instead of the generic completion presentation. Presentation-only:
+    /// never mutates any authoritative mode/power state.
+    /// </summary>
+    public void CompleteWithMessage(string title, string subtitle)
+    {
+        _finished = true;
+        _coordinator.Complete(_id, subtitle, title, subtitle);
     }
 
     public void Fail(string errorMessage)

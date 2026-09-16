@@ -45,61 +45,65 @@
                 <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="Bold" Foreground="{StaticResource Cyan}"
                            HorizontalAlignment="Center" Margin="0,3,0,0" />
 
-                <!-- Parade video -->
-                <Border Margin="0,18,0,16" CornerRadius="14" Background="#7A05070C" BorderBrush="#5F20E6FF"
-                        BorderThickness="1" Padding="2" ClipToBounds="True">
-                    <Grid Height="220">
-                        <MediaElement x:Name="ParadeVideo"
-                                      LoadedBehavior="Manual" UnloadedBehavior="Stop"
-                                      Stretch="Uniform" StretchDirection="Both"
-                                      IsHitTestVisible="False"
-                                      Volume="0" ScrubbingEnabled="False"
-                                      MediaEnded="ParadeVideo_OnMediaEnded" />
+                <!-- Progress visuals: parade video, activity ribbon/percentage, status, milestones.
+                     Fades out once a text-only completion screen (mode/power final-state) is shown. -->
+                <StackPanel Visibility="{Binding ShowProgressVisuals, Converter={StaticResource BoolToVisibility}}">
+                    <!-- Parade video -->
+                    <Border Margin="0,18,0,16" CornerRadius="14" Background="#7A05070C" BorderBrush="#5F20E6FF"
+                            BorderThickness="1" Padding="2" ClipToBounds="True">
+                        <Grid Height="220">
+                            <MediaElement x:Name="ParadeVideo"
+                                          LoadedBehavior="Manual" UnloadedBehavior="Stop"
+                                          Stretch="Uniform" StretchDirection="Both"
+                                          IsHitTestVisible="False"
+                                          Volume="0" ScrubbingEnabled="False"
+                                          MediaEnded="ParadeVideo_OnMediaEnded" />
+                        </Grid>
+                    </Border>
+
+                    <!-- Indeterminate activity ribbon -->
+                    <Grid Height="4" Margin="0,0,0,14" Visibility="{Binding IsIndeterminate, Converter={StaticResource BoolToVisibility}}">
+                        <Rectangle Fill="#22FFFFFF" RadiusX="2" RadiusY="2" />
+                        <Rectangle x:Name="IndeterminatePulse" Width="140" HorizontalAlignment="Left" RadiusX="2" RadiusY="2">
+                            <Rectangle.Fill>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                    <GradientStop Color="#0020E6FF" Offset="0" />
+                                    <GradientStop Color="#FF20E6FF" Offset="0.5" />
+                                    <GradientStop Color="#00FF2BD6" Offset="1" />
+                                </LinearGradientBrush>
+                            </Rectangle.Fill>
+                        </Rectangle>
                     </Grid>
-                </Border>
 
-                <!-- Indeterminate activity ribbon -->
-                <Grid Height="4" Margin="0,0,0,14" Visibility="{Binding IsIndeterminate, Converter={StaticResource BoolToVisibility}}">
-                    <Rectangle Fill="#22FFFFFF" RadiusX="2" RadiusY="2" />
-                    <Rectangle x:Name="IndeterminatePulse" Width="140" HorizontalAlignment="Left" RadiusX="2" RadiusY="2">
-                        <Rectangle.Fill>
+                    <!-- Determinate percentage -->
+                    <TextBlock Text="{Binding ProgressText}" FontSize="34" FontWeight="Black" HorizontalAlignment="Center"
+                               Visibility="{Binding IsIndeterminate, Converter={StaticResource InverseBoolToVisibility}}">
+                        <TextBlock.Foreground>
                             <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                <GradientStop Color="#0020E6FF" Offset="0" />
-                                <GradientStop Color="#FF20E6FF" Offset="0.5" />
-                                <GradientStop Color="#00FF2BD6" Offset="1" />
+                                <GradientStop Color="#20E6FF" Offset="0" />
+                                <GradientStop Color="#FF2BD6" Offset="1" />
                             </LinearGradientBrush>
-                        </Rectangle.Fill>
-                    </Rectangle>
-                </Grid>
+                        </TextBlock.Foreground>
+                    </TextBlock>
 
-                <!-- Determinate percentage -->
-                <TextBlock Text="{Binding ProgressText}" FontSize="34" FontWeight="Black" HorizontalAlignment="Center"
-                           Visibility="{Binding IsIndeterminate, Converter={StaticResource InverseBoolToVisibility}}">
-                    <TextBlock.Foreground>
-                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                            <GradientStop Color="#20E6FF" Offset="0" />
-                            <GradientStop Color="#FF2BD6" Offset="1" />
-                        </LinearGradientBrush>
-                    </TextBlock.Foreground>
-                </TextBlock>
+                    <TextBlock Text="{Binding Status}" Foreground="#C9D7E2" FontSize="13" HorizontalAlignment="Center"
+                               Margin="0,4,0,18" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="520" />
 
-                <TextBlock Text="{Binding Status}" Foreground="#C9D7E2" FontSize="13" HorizontalAlignment="Center"
-                           Margin="0,4,0,18" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="520" />
+                    <ProgressBar Height="6" Margin="0,0,0,14" Minimum="0" Maximum="100" Value="{Binding Progress, Mode=OneWay}"
+                                 Visibility="{Binding IsIndeterminate, Converter={StaticResource InverseBoolToVisibility}}" />
 
-                <ProgressBar Height="6" Margin="0,0,0,14" Minimum="0" Maximum="100" Value="{Binding Progress, Mode=OneWay}"
-                             Visibility="{Binding IsIndeterminate, Converter={StaticResource InverseBoolToVisibility}}" />
+                    <!-- Milestone row: 20% cyan / 40% magenta / 60% cyan / 80% magenta / 100% combined -->
+                    <UniformGrid Columns="5" Margin="0,0,0,4">
+                        <TextBlock x:Name="Milestone20Label" Text="20%" Style="{StaticResource MilestoneLabel}" />
+                        <TextBlock x:Name="Milestone40Label" Text="40%" Style="{StaticResource MilestoneLabel}" />
+                        <TextBlock x:Name="Milestone60Label" Text="60%" Style="{StaticResource MilestoneLabel}" />
+                        <TextBlock x:Name="Milestone80Label" Text="80%" Style="{StaticResource MilestoneLabel}" />
+                        <TextBlock x:Name="Milestone100Label" Text="100%" Style="{StaticResource MilestoneLabel}" />
+                    </UniformGrid>
+                </StackPanel>
 
-                <!-- Milestone row: 20% cyan / 40% magenta / 60% cyan / 80% magenta / 100% combined -->
-                <UniformGrid Columns="5" Margin="0,0,0,4">
-                    <TextBlock x:Name="Milestone20Label" Text="20%" Style="{StaticResource MilestoneLabel}" />
-                    <TextBlock x:Name="Milestone40Label" Text="40%" Style="{StaticResource MilestoneLabel}" />
-                    <TextBlock x:Name="Milestone60Label" Text="60%" Style="{StaticResource MilestoneLabel}" />
-                    <TextBlock x:Name="Milestone80Label" Text="80%" Style="{StaticResource MilestoneLabel}" />
-                    <TextBlock x:Name="Milestone100Label" Text="100%" Style="{StaticResource MilestoneLabel}" />
-                </UniformGrid>
-
-                <!-- Completion state -->
-                <StackPanel Visibility="{Binding IsCompleted, Converter={StaticResource BoolToVisibility}}"
+                <!-- Generic completion state (operations that complete without exact completion copy) -->
+                <StackPanel Visibility="{Binding IsPlainCompletion, Converter={StaticResource BoolToVisibility}}"
                             Margin="0,18,0,0" HorizontalAlignment="Center">
                     <TextBlock Text="{Binding CompletionHeadline}" FontSize="16" FontWeight="Black"
                                HorizontalAlignment="Center">
@@ -113,6 +117,37 @@
                             <DropShadowEffect Color="#FFFFFF" BlurRadius="16" ShadowDepth="0" Opacity="0.5" />
                         </TextBlock.Effect>
                     </TextBlock>
+                </StackPanel>
+
+                <!-- Text-only completion/final-state screen: Gaming, Programming, Normal, Restart, Shutdown.
+                     No images/video/icons - a large primary title and a smaller secondary sentence, centered,
+                     using only the established cyan/magenta/white theme tokens. -->
+                <StackPanel Visibility="{Binding HasTextCompletion, Converter={StaticResource BoolToVisibility}}"
+                            Margin="0,14,0,0" HorizontalAlignment="Center">
+                    <StackPanel.Triggers>
+                        <EventTrigger RoutedEvent="StackPanel.Loaded">
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="0:0:0.35" />
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+                    </StackPanel.Triggers>
+                    <TextBlock Text="{Binding CompletionTitleText}" FontSize="30" FontWeight="Black"
+                               HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="560">
+                        <TextBlock.Foreground>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                <GradientStop Color="#20E6FF" Offset="0" />
+                                <GradientStop Color="#FF2BD6" Offset="1" />
+                            </LinearGradientBrush>
+                        </TextBlock.Foreground>
+                        <TextBlock.Effect>
+                            <DropShadowEffect Color="#FFFFFF" BlurRadius="18" ShadowDepth="0" Opacity="0.5" />
+                        </TextBlock.Effect>
+                    </TextBlock>
+                    <TextBlock Text="{Binding CompletionSubtitleText}" FontSize="15" FontWeight="SemiBold"
+                               Foreground="#E7F3FA" HorizontalAlignment="Center" TextAlignment="Center"
+                               TextWrapping="Wrap" MaxWidth="520" Margin="0,10,0,0" />
                 </StackPanel>
 
                 <!-- Failure state -->

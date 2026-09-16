@@ -158,3 +158,31 @@ internal sealed class FakeSystem : ISystemController
         }
     }
 }
+
+/// <summary>Records every invocation so tests can assert power actions never fire prematurely or on failure.</summary>
+internal sealed class FakePowerActionInvoker : IPowerActionInvoker
+{
+    public List<(PowerAction Action, MachineMode ModeAtInvocationTime)> Invocations { get; } = [];
+    public int ExitCodeToReturn { get; set; }
+    public Func<MachineMode>? CurrentModeAccessor { get; set; }
+
+    public Task<int> InvokeAsync(PowerAction action, CancellationToken cancellationToken = default)
+    {
+        Invocations.Add((action, CurrentModeAccessor?.Invoke() ?? MachineMode.RecoveryRequired));
+        return Task.FromResult(ExitCodeToReturn);
+    }
+}
+
+/// <summary>Deterministic <see cref="IRandomProvider"/> that always returns a fixed index for assertions,
+/// or can be driven through a sequence to exercise multiple selections.</summary>
+internal sealed class SequencedRandomProvider(params int[] values) : IRandomProvider
+{
+    private int _index;
+
+    public int Next(int minInclusive, int maxExclusive)
+    {
+        var value = values[_index % values.Length];
+        _index++;
+        return Math.Clamp(value, minInclusive, maxExclusive - 1);
+    }
+}

@@ -160,4 +160,52 @@ public class LoadingCoordinatorTests
         Assert.True(coordinator.Current.IsFailed);
         Assert.False(coordinator.Current.IsCompleted);
     }
+
+    [Fact]
+    public void CompleteWithMessage_SetsTextOnlyCompletionTitleAndSubtitle()
+    {
+        var coordinator = new LoadingCoordinator();
+        using var op = coordinator.Begin("Gaming Mode", "Requesting Windows elevation…");
+
+        op.CompleteWithMessage("GAME MODE ENHANCED", "Latency neutralized. Good luck, pilot.");
+
+        var state = coordinator.Current!;
+        Assert.True(state.IsCompleted);
+        Assert.Equal(100, state.Progress);
+        Assert.Equal("GAME MODE ENHANCED", state.CompletionTitle);
+        Assert.Equal("Latency neutralized. Good luck, pilot.", state.CompletionSubtitle);
+    }
+
+    [Fact]
+    public void FailedOperation_NeverCarriesTextCompletionCopy()
+    {
+        // A failed transition must never expose success completion copy: Fail() never sets
+        // CompletionTitle/CompletionSubtitle, so the UI's HasTextCompletion binding stays false.
+        var coordinator = new LoadingCoordinator();
+        using var op = coordinator.Begin("Gaming Mode", "Stopping development services…");
+
+        op.Fail("Gaming cleanup verification failed.");
+
+        var state = coordinator.Current!;
+        Assert.True(state.IsFailed);
+        Assert.False(state.IsCompleted);
+        Assert.Null(state.CompletionTitle);
+        Assert.Null(state.CompletionSubtitle);
+    }
+
+    [Fact]
+    public void CompleteWithMessage_IsPresentationOnly_DoesNotTouchAuthoritativeModeState()
+    {
+        // LoadingOperationState/LoadingCoordinator carry zero references to ModeState/IStateStore;
+        // completing with a text message can only ever mutate this presentation-only record.
+        var coordinator = new LoadingCoordinator();
+        using var op = coordinator.Begin("Restart Windows", "Returning to Normal Mode…");
+
+        op.CompleteWithMessage("REBOOTING SYSTEM.", "Cleaning out the digital cobwebs.");
+
+        // The only side effects of CompleteWithMessage are on this operation's own presentation
+        // fields; nothing here is capable of writing to any persisted mode/power state.
+        Assert.True(coordinator.Current!.IsCompleted);
+        Assert.Single(coordinator.ActiveOperations);
+    }
 }

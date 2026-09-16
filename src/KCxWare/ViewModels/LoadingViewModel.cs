@@ -16,7 +16,8 @@ public sealed class LoadingViewModel : INotifyPropertyChanged
         nameof(IsVisible), nameof(Title), nameof(Status), nameof(IsIndeterminate), nameof(Progress),
         nameof(ProgressText), nameof(IsCompleted), nameof(IsFailed), nameof(ErrorMessage),
         nameof(Milestone20), nameof(Milestone40), nameof(Milestone60), nameof(Milestone80), nameof(Milestone100),
-        nameof(CompletionHeadline)
+        nameof(CompletionHeadline), nameof(HasTextCompletion), nameof(CompletionTitleText),
+        nameof(CompletionSubtitleText), nameof(ShowProgressVisuals), nameof(IsPlainCompletion)
     };
 
     private readonly LoadingCoordinator _coordinator;
@@ -54,6 +55,17 @@ public sealed class LoadingViewModel : INotifyPropertyChanged
 
     public string CompletionHeadline => _current?.IsGamingRelated == true ? "KCX GAMING MODE ACTIVE" : "KCX · COMPLETE";
 
+    /// <summary>True when this operation completed with a text-only completion screen (mode/power final-state copy).</summary>
+    public bool HasTextCompletion => IsCompleted && !string.IsNullOrEmpty(_current?.CompletionTitle);
+    public string CompletionTitleText => _current?.CompletionTitle ?? string.Empty;
+    public string CompletionSubtitleText => _current?.CompletionSubtitle ?? string.Empty;
+
+    /// <summary>False once a text-only completion is showing - the parade video/progress/milestones fade out.</summary>
+    public bool ShowProgressVisuals => !HasTextCompletion;
+
+    /// <summary>True for the original generic completion presentation (no exact completion copy set).</summary>
+    public bool IsPlainCompletion => IsCompleted && !HasTextCompletion;
+
     public RelayCommand DismissCommand => new(() =>
     {
         if (_current is { IsFailed: true } failed) _coordinator.Dismiss(failed.Id);
@@ -72,6 +84,9 @@ public sealed class LoadingViewModel : INotifyPropertyChanged
 
         if (_current is { IsCompleted: true })
         {
+            // Text-only completion/final-state screens (mode + power) need a bit longer on
+            // screen than the generic completion presentation so the copy is actually readable.
+            _dismissTimer.Interval = HasTextCompletion ? TimeSpan.FromMilliseconds(1800) : TimeSpan.FromMilliseconds(900);
             _dismissTimer.Stop();
             _dismissTimer.Start();
         }

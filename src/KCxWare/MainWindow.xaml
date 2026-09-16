@@ -141,9 +141,30 @@
 
             <Border Grid.Row="2" Style="{StaticResource GlassSurface}" Background="#48050A11" CornerRadius="11" Padding="14,9">
             <Grid>
-                <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                <TextBlock Foreground="#71DDEB" FontSize="10"><Run Text="LAST TRANSITION  ·  " /><Run Text="{Binding LastTransition, Mode=OneWay}" Foreground="#E3EDF5" /></TextBlock>
-                <TextBlock Grid.Column="1" Foreground="#71DDEB" FontSize="10"><Run Text="REBOOT  ·  " /><Run Text="{Binding RebootStatus, Mode=OneWay}" Foreground="{StaticResource Magenta}" /></TextBlock>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Foreground="#71DDEB" FontSize="10"><Run Text="LAST TRANSITION  ·  " /><Run Text="{Binding LastTransition, Mode=OneWay}" Foreground="#E3EDF5" /></TextBlock>
+                    <TextBlock Foreground="#71DDEB" FontSize="10" Margin="0,2,0,0"><Run Text="REBOOT  ·  " /><Run Text="{Binding RebootStatus, Mode=OneWay}" Foreground="{StaticResource Magenta}" /></TextBlock>
+                </StackPanel>
+
+                <!-- POWER: Restart/Shut Down Windows. These are power controls, not modes; both
+                     require confirmation and are disabled whenever another KCxWare operation is active. -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                    <TextBlock Text="P O W E R" Foreground="#8FA9BC" FontSize="9" FontWeight="Bold"
+                               VerticalAlignment="Center" Margin="0,0,10,0" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <Button Style="{StaticResource NeonButton}" Content="RESTART WINDOWS" Click="RestartWindowsClick"
+                            IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBoolToBool}}"
+                            Padding="14,8" FontSize="11" Margin="0,0,8,0" BorderBrush="{StaticResource Cyan}" />
+                    <Button Style="{StaticResource NeonButton}" Content="SHUT DOWN WINDOWS" Click="ShutdownWindowsClick"
+                            IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBoolToBool}}"
+                            Padding="14,8" FontSize="11" BorderBrush="{StaticResource Magenta}" />
+                </StackPanel>
             </Grid>
             </Border>
         </Grid>

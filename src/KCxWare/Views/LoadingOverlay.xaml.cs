@@ -52,6 +52,11 @@ public partial class LoadingOverlay : UserControl
             case nameof(LoadingViewModel.IsVisible):
                 SyncVideoPlayback(vm.IsVisible);
                 break;
+            case nameof(LoadingViewModel.HasTextCompletion):
+                // The parade video is only ever for loading/progress - stop it as soon as the
+                // text-only completion screen takes over so it visibly disappears, not just hides.
+                if (vm.HasTextCompletion) ParadeVideo.Stop();
+                break;
             case nameof(LoadingViewModel.Milestone20):
             case nameof(LoadingViewModel.Milestone40):
             case nameof(LoadingViewModel.Milestone60):

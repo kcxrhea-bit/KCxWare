@@ -3,6 +3,7 @@ using System.Windows.Threading;
 using System.IO.Pipes;
 using System.IO;
 using System.Text.Json;
+using KCxWare.Core.Abstractions;
 using KCxWare.Core.Loading;
 using KCxWare.Core.Models;
 using KCxWare.ViewModels;
@@ -16,6 +17,7 @@ namespace KCxWare;
 public partial class MainWindow
 {
     private readonly MainViewModel _viewModel = new();
+    private readonly IRandomProvider _random = new SystemRandomProvider();
 
     public MainWindow()
     {
@@ -36,6 +38,9 @@ public partial class MainWindow
     private async void GamingClick(object sender, RoutedEventArgs e) => await ConfirmAndApplyAsync(MachineMode.Gaming);
     private async void ProgrammingClick(object sender, RoutedEventArgs e) => await ConfirmAndApplyAsync(MachineMode.Programming);
     private async void NormalClick(object sender, RoutedEventArgs e) => await ConfirmAndApplyAsync(MachineMode.Normal);
+
+    private async void RestartWindowsClick(object sender, RoutedEventArgs e) => await ConfirmAndExecutePowerActionAsync(PowerAction.Restart);
+    private async void ShutdownWindowsClick(object sender, RoutedEventArgs e) => await ConfirmAndExecutePowerActionAsync(PowerAction.Shutdown);
 
     private async Task ConfirmAndApplyAsync(MachineMode mode)
     {
@@ -175,5 +180,61 @@ public partial class MainWindow
         }
 
         public void Dispose() => _stop.Cancel();
+    }
+
+    /// <summary>
+    /// RESTART WINDOWS / SHUT DOWN WINDOWS. Strict ordering: confirm -&gt; (Normal restoration if
+    /// necessary, handled entirely by <see cref="Core.Orchestration.PowerOrchestrator"/>) -&gt;
+    /// authoritative verification -&gt; text-only power final-state message -&gt; the actual Windows
+    /// power request. Cancelling the confirmation leaves mode/power state completely untouched.
+    /// </summary>
+    private async Task ConfirmAndExecutePowerActionAsync(PowerAction action)
+    {
+        if (_viewModel.IsBusy) return;
+
+        var isRestart = action == PowerAction.Restart;
+        var verb = isRestart ? "Restart" : "Shut down";
+        var message = isRestart
+            ? "Restart Windows? KCxWare will return the system to Normal Mode before restarting."
+            : "Shut down Windows? KCxWare will return the system to Normal Mode before shutting down.";
+
+        var answer = MessageBox.Show(message, $"{verb} Windows",
+            MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes) return;
+
+        using var op = _viewModel.LoadingCoordinator.Begin(
+            $"{verb} Windows", "Returning to Normal Mode before the Windows power request…", indeterminate: true);
+        await Dispatcher.Yield(DispatcherPriority.Render);
+
+        try
+        {
+            var result = await _viewModel.PowerOrchestrator.ExecuteAsync(action, async () =>
+            {
+                // Shown only after Normal restoration has succeeded and been verified, and
+                // strictly before the Windows power request is issued.
+                var flavor = isRestart
+                    ? CompletionMessages.SelectRestartMessage(_random)
+                    : CompletionMessages.SelectShutdownMessage(_random);
+                op.CompleteWithMessage(flavor.Title, flavor.Subtitle);
+                await Dispatcher.Yield(DispatcherPriority.Render);
+                await Task.Delay(TimeSpan.FromMilliseconds(1200));
+            });
+
+            if (!result.Succeeded)
+            {
+                op.Fail(result.ErrorMessage ?? "The Windows power action could not be completed.");
+                MessageBox.Show(op.ErrorMessage, "KCxWare", MessageBoxButton.OK, MessageBoxImage.Error);
+                await _viewModel.RefreshAsync();
+            }
+
+            // On success the Windows power request has already been issued by the orchestrator;
+            // Windows will begin terminating this app shortly, so there is nothing further to do.
+        }
+        catch (Exception exception)
+        {
+            op.Fail(exception.Message);
+            MessageBox.Show(exception.Message, "KCxWare", MessageBoxButton.OK, MessageBoxImage.Error);
+            await _viewModel.RefreshAsync();
+        }
     }
 }
