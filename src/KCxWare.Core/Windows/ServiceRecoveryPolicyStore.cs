@@ -21,12 +21,33 @@ public sealed class ServiceRecoveryPolicyStore : IServiceRecoveryPolicyStore
     private const uint ServiceConfigFailureActionsFlag = 4;
     private const int ErrorInsufficientBuffer = 122;
 
+    /// <summary>
+    /// Access mask used to open the service handle for the read-only query path
+    /// (<see cref="GetFailureActionsAsync"/>). Requests only <c>SERVICE_QUERY_CONFIG</c> (0x0001) -
+    /// least privilege, since this path never mutates the service configuration.
+    /// Exposed as a named, testable constant (rather than an inline literal) so tests can assert
+    /// the exact numeric value passed to <c>OpenServiceW</c> without needing to intercept the
+    /// native P/Invoke call itself.
+    /// </summary>
+    public const uint QueryAccessMask = ServiceQueryConfig;
+
+    /// <summary>
+    /// Access mask used to open the service handle for the mutating path
+    /// (<see cref="SetFailureActionsAsync"/>). Requests <c>SERVICE_CHANGE_CONFIG | SERVICE_QUERY_CONFIG</c>
+    /// (0x0003) - <c>SERVICE_CHANGE_CONFIG</c> is required by <c>ChangeServiceConfig2W</c>, and
+    /// <c>SERVICE_QUERY_CONFIG</c> is required for the fail-closed readback verification
+    /// (<c>QueryServiceConfig2W</c>) performed on the same handle immediately after the write.
+    /// Deliberately not <c>SERVICE_ALL_ACCESS</c> (0xF01FF) - least privilege, nothing broader than
+    /// this path actually needs.
+    /// </summary>
+    public const uint ChangeAccessMask = ServiceChangeConfig | ServiceQueryConfig;
+
     public async Task<ServiceFailureActionsConfig> GetFailureActionsAsync(string serviceName,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         using var scManager = OpenManager();
-        using var service = OpenServiceHandle(scManager, serviceName, ServiceQueryConfig);
+        using var service = OpenServiceHandle(scManager, serviceName, QueryAccessMask);
 
         var actions = ReadFailureActions(service, serviceName);
         var flag = ReadFailureActionsFlag(service, serviceName);
@@ -39,7 +60,7 @@ public sealed class ServiceRecoveryPolicyStore : IServiceRecoveryPolicyStore
     {
         cancellationToken.ThrowIfCancellationRequested();
         using var scManager = OpenManager();
-        using var service = OpenServiceHandle(scManager, serviceName, ServiceChangeConfig | ServiceQueryConfig);
+        using var service = OpenServiceHandle(scManager, serviceName, ChangeAccessMask);
 
         WriteFailureActions(service, serviceName, config);
         WriteFailureActionsFlag(service, serviceName, config.ActionsOnNonCrashFailures);
