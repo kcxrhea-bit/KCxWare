@@ -19,9 +19,14 @@ public partial class MainWindow
     private readonly MainViewModel _viewModel = new();
     private readonly IRandomProvider _random = new SystemRandomProvider();
 
+    // Manual CHAOS sayings: a separate shuffle-bag instance/collection from the automatic
+    // CompletionMessages flavor text, advanced only on an explicit CHAOS button press.
+    private readonly ShuffleBag<string> _chaosBag;
+
     public MainWindow()
     {
         InitializeComponent();
+        _chaosBag = ChaosMessages.CreateShuffleBag(_random);
         DataContext = _viewModel;
         LoadingHost.DataContext = new LoadingViewModel(_viewModel.LoadingCoordinator);
         Loaded += async (_, _) =>
@@ -41,6 +46,16 @@ public partial class MainWindow
 
     private async void RestartWindowsClick(object sender, RoutedEventArgs e) => await ConfirmAndExecutePowerActionAsync(PowerAction.Restart);
     private async void ShutdownWindowsClick(object sender, RoutedEventArgs e) => await ConfirmAndExecutePowerActionAsync(PowerAction.Shutdown);
+
+    /// <summary>
+    /// Purely cosmetic: shows the next CHAOS saying inline. Never touches mode, power, or any other
+    /// authoritative state - it only advances the manual shuffle-bag and updates the inline panel text.
+    /// </summary>
+    private void ChaosClick(object sender, RoutedEventArgs e)
+    {
+        ChaosText.Text = _chaosBag.Next();
+        ChaosPanel.Visibility = Visibility.Visible;
+    }
 
     private async Task ConfirmAndApplyAsync(MachineMode mode)
     {
