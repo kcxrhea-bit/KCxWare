@@ -2,6 +2,7 @@ namespace KCxWare.Core.Abstractions;
 
 public interface ISystemController
 {
+    string CurrentSessionId { get; }
     Task<string?> GetActivePowerPlanAsync(CancellationToken cancellationToken = default);
     Task<bool> PowerPlanExistsAsync(string planId, CancellationToken cancellationToken = default);
     Task SetPowerPlanAsync(string planId, CancellationToken cancellationToken = default);

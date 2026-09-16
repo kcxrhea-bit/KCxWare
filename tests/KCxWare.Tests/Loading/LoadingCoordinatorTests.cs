@@ -143,4 +143,21 @@ public class LoadingCoordinatorTests
         Assert.NotNull(coordinator.Current);
         Assert.Equal(id, coordinator.Current!.Id);
     }
+
+    [Fact]
+    public void Progress_IsMonotonic_AndFailurePreservesReachedPercentage()
+    {
+        var coordinator = new LoadingCoordinator();
+        using var op = coordinator.Begin("Gaming Mode", "Preparing…", indeterminate: false);
+
+        op.Update("Baseline secured", 60, false);
+        op.Update("Stale event", 40, false);
+
+        Assert.Equal(60, coordinator.Current!.Progress);
+        Assert.False(coordinator.Current.IsCompleted);
+        op.Fail("Verification failed.");
+        Assert.Equal(60, coordinator.Current.Progress);
+        Assert.True(coordinator.Current.IsFailed);
+        Assert.False(coordinator.Current.IsCompleted);
+    }
 }

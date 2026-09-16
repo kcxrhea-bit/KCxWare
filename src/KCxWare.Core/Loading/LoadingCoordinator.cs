@@ -77,7 +77,7 @@ public sealed class LoadingCoordinator
             var op = _stack.Find(o => o.Id == id);
             if (op is null) return;
             if (status is not null) op.Status = status;
-            if (progress is not null) op.Progress = Math.Clamp(progress.Value, 0, 100);
+            if (progress is not null) op.Progress = Math.Max(op.Progress, Math.Clamp(progress.Value, 0, 100));
             if (indeterminate is not null) op.IsIndeterminate = indeterminate.Value;
         }
 

@@ -7,6 +7,7 @@ namespace KCxWare.Core.Windows;
 
 public sealed partial class WindowsSystemController(ICommandRunner runner) : ISystemController
 {
+    public string CurrentSessionId => Environment.TickCount64.ToString(System.Globalization.CultureInfo.InvariantCulture);
     public async Task<string?> GetActivePowerPlanAsync(CancellationToken cancellationToken = default)
     {
         var result = await runner.RunAsync("powercfg.exe", ["/getactivescheme"], cancellationToken);

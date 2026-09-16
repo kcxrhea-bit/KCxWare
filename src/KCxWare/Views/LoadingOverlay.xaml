@@ -86,6 +86,9 @@
                 <TextBlock Text="{Binding Status}" Foreground="#C9D7E2" FontSize="13" HorizontalAlignment="Center"
                            Margin="0,4,0,18" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="520" />
 
+                <ProgressBar Height="6" Margin="0,0,0,14" Minimum="0" Maximum="100" Value="{Binding Progress, Mode=OneWay}"
+                             Visibility="{Binding IsIndeterminate, Converter={StaticResource InverseBoolToVisibility}}" />
+
                 <!-- Milestone row: 20% cyan / 40% magenta / 60% cyan / 80% magenta / 100% combined -->
                 <UniformGrid Columns="5" Margin="0,0,0,4">
                     <TextBlock x:Name="Milestone20Label" Text="20%" Style="{StaticResource MilestoneLabel}" />

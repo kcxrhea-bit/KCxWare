@@ -1,13 +1,88 @@
 using KCxWare.Core.Abstractions;
+using KCxWare.Core.Loading;
 using KCxWare.Core.Models;
 using KCxWare.Core.Policies;
 
 namespace KCxWare.Core.Orchestration;
 
-public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController system, Action<string>? log = null)
+public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController system, Action<string>? log = null,
+    ITransitionProgressReporter? progress = null)
 {
+    public string CurrentSessionId => system.CurrentSessionId;
     public Task<ModeState> GetStateAsync(CancellationToken cancellationToken = default) =>
         stateStore.LoadAsync(cancellationToken);
+
+    public async Task<ModeState> ApplyLiveAsync(MachineMode target, CancellationToken cancellationToken = default)
+    {
+        if (target is not (MachineMode.Gaming or MachineMode.Programming or MachineMode.Normal))
+        {
+            throw new ArgumentOutOfRangeException(nameof(target), "Only final modes can be applied live.");
+        }
+
+        ModePolicy.AssertSafe();
+        var state = await stateStore.LoadAsync(cancellationToken);
+        await system.DeleteOneShotTaskAsync(cancellationToken);
+        if (state.CurrentMode == MachineMode.RecoveryRequired)
+        {
+            return state;
+        }
+
+        var transaction = NewTransaction(state.CurrentMode, target);
+        var operationId = transaction.Id;
+        progress?.Report(new(operationId, 0, $"Preparing {target} Mode…"));
+        var previousPowerPlan = state.PreviousPowerPlan ?? await system.GetActivePowerPlanAsync(cancellationToken);
+        var baseline = state.ChangedServices.Count == 0 && state.CurrentMode == MachineMode.Normal
+            ? await CaptureGamingServicesAsync(cancellationToken) : state.ChangedServices;
+        state = state with { Transaction = transaction, ChangedServices = baseline, LastError = null };
+        await stateStore.SaveAsync(state, cancellationToken);
+        progress?.Report(new(operationId, 20, "Baseline secured"));
+
+        try
+        {
+            if (target == MachineMode.Gaming)
+            {
+                await ApplyGamingAsync(operationId, cancellationToken);
+            }
+            else
+            {
+                await RestoreCapturedServicesAsync(state, cancellationToken);
+                progress?.Report(new(operationId, 40, $"{target} services restored"));
+                await ApplyNonGamingPowerPlanAsync(target, state.PreviousPowerPlan, cancellationToken);
+                progress?.Report(new(operationId, 60, $"{target} power configuration applied"));
+                _ = await system.GetActivePowerPlanAsync(cancellationToken);
+                progress?.Report(new(operationId, 80, $"Verifying {target} Mode…", true));
+            }
+
+            var completed = state with
+            {
+                CurrentMode = target,
+                DesiredMode = target,
+                PreviousPowerPlan = target == MachineMode.Normal ? null : previousPowerPlan,
+                ChangedServices = target == MachineMode.Normal ? [] : baseline,
+                SessionId = target == MachineMode.Normal ? null : system.CurrentSessionId,
+                Transaction = transaction with { Completed = true },
+                LastSuccessfulTransitionUtc = DateTimeOffset.UtcNow
+            };
+            await stateStore.SaveAsync(completed, cancellationToken);
+            return completed;
+        }
+        catch (Exception exception)
+        {
+            return await FailAsync(state, transaction, exception, cancellationToken);
+        }
+    }
+
+    public async Task<ModeState> NormalizeAfterBootAsync(CancellationToken cancellationToken = default)
+    {
+        var state = await stateStore.LoadAsync(cancellationToken);
+        if (state.CurrentMode is not (MachineMode.Gaming or MachineMode.Programming) ||
+            string.Equals(state.SessionId, system.CurrentSessionId, StringComparison.Ordinal))
+        {
+            return state;
+        }
+
+        return await ApplyLiveAsync(MachineMode.Normal, cancellationToken);
+    }
 
     public async Task<ModeState> ArmAsync(MachineMode target, string helperPath,
         CancellationToken cancellationToken = default)
@@ -81,7 +156,7 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
         {
             if (target == MachineMode.Gaming)
             {
-                await ApplyGamingAsync(cancellationToken);
+                await ApplyGamingAsync(transaction.Id, cancellationToken);
             }
             else
             {
@@ -177,7 +252,7 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
         return snapshots;
     }
 
-    private async Task ApplyGamingAsync(CancellationToken cancellationToken)
+    private async Task ApplyGamingAsync(string operationId, CancellationToken cancellationToken)
     {
         await system.DelayAsync(ModePolicy.GamingSettleDelay, cancellationToken);
 
@@ -211,6 +286,7 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
 
                 await system.StopServiceAsync(service, cancellationToken);
             }
+            progress?.Report(new(operationId, 40, "Gaming services configured"));
 
             foreach (var process in ModePolicy.GamingSuppressibleProcesses)
             {
@@ -226,6 +302,7 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
             {
                 await system.StopProcessAsync(process, backgroundOnly: true, cancellationToken);
             }
+            progress?.Report(new(operationId, 60, "Gaming processes cleaned"));
 
             await system.DelayAsync(ModePolicy.GamingVerificationRetryDelay, cancellationToken);
             survivingServices = await FindSurvivingServicesAsync(safetySkippedServices, cancellationToken);
@@ -266,6 +343,7 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
         {
             await system.SetPowerPlanAsync(ModePolicy.GamingPowerPlan, cancellationToken);
         }
+        progress?.Report(new(operationId, 80, "Verifying Gaming Mode…", true));
     }
 
     private async Task<IReadOnlyList<string>> FindSurvivingServicesAsync(

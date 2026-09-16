@@ -34,6 +34,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public bool ShowGamingExit => _state.CurrentMode is MachineMode.Gaming or MachineMode.GamingArmed;
     public bool ShowRecovery => _state.CurrentMode == MachineMode.RecoveryRequired;
     public bool ShowCancel => _state.RebootRequired;
+    public bool NeedsBootNormalization => _state.CurrentMode is MachineMode.Gaming or MachineMode.Programming &&
+        !string.Equals(_state.SessionId, _orchestrator.CurrentSessionId, StringComparison.Ordinal);
+
+    public async Task NormalizeAfterBootAsync() => await RunElevatedAsync("normalize-after-boot");
 
     /// <summary>True while any tracked operation is active. Buttons bind to this to prevent double-submission.</summary>
     public bool IsBusy

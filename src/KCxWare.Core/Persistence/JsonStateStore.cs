@@ -28,9 +28,21 @@ public sealed class JsonStateStore : IStateStore
 
         await using var stream = File.OpenRead(_path);
         var state = await JsonSerializer.DeserializeAsync<ModeState>(stream, Options, cancellationToken);
-        if (state is null || state.SchemaVersion != ModeState.CurrentSchemaVersion)
+        if (state is null || state.SchemaVersion is < 1 or > ModeState.CurrentSchemaVersion)
         {
             return new ModeState { CurrentMode = MachineMode.RecoveryRequired, LastError = "Unsupported or invalid state file." };
+        }
+
+        if (state.SchemaVersion == 1)
+        {
+            return state with
+            {
+                SchemaVersion = ModeState.CurrentSchemaVersion,
+                CurrentMode = state.CurrentMode is MachineMode.GamingArmed or MachineMode.ProgrammingArmed or MachineMode.NormalArmed
+                    ? MachineMode.RecoveryRequired : state.CurrentMode,
+                LastError = state.CurrentMode is MachineMode.GamingArmed or MachineMode.ProgrammingArmed or MachineMode.NormalArmed
+                    ? "Legacy armed transition requires safe recovery." : state.LastError
+            };
         }
 
         if (state.Transaction is { Completed: false })

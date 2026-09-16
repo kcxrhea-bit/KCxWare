@@ -1,5 +1,6 @@
 using KCxWare.Core.Abstractions;
 using KCxWare.Core.Models;
+using KCxWare.Core.Loading;
 using KCxWare.Core.Policies;
 using KCxWare.Core.Windows;
 
@@ -37,6 +38,12 @@ internal sealed class RecordingRunner : ICommandRunner
     }
 }
 
+internal sealed class RecordingProgress : ITransitionProgressReporter
+{
+    public List<TransitionProgress> Events { get; } = [];
+    public void Report(TransitionProgress progress) => Events.Add(progress);
+}
+
 internal sealed class SequencedRunner(params CommandResult[] results) : ICommandRunner
 {
     private readonly Queue<CommandResult> _results = new(results);
@@ -52,6 +59,7 @@ internal sealed class SequencedRunner(params CommandResult[] results) : ICommand
 
 internal sealed class FakeSystem : ISystemController
 {
+    public string CurrentSessionId { get; set; } = "test-session";
     public Dictionary<string, bool> Services { get; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, int> ServiceRestartsRemaining { get; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, bool> ServiceCanStopSafely { get; } = new(StringComparer.OrdinalIgnoreCase);

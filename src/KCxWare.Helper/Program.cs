@@ -4,6 +4,7 @@ using KCxWare.Core.Models;
 using KCxWare.Core.Orchestration;
 using KCxWare.Core.Persistence;
 using KCxWare.Core.Windows;
+using KCxWare.Core.Loading;
 
 return await HelperProgram.RunAsync(args);
 
@@ -24,28 +25,26 @@ internal static class HelperProgram
         {
             if (args.Length == 0)
             {
-                throw new ArgumentException("Expected arm, apply-armed, recover, or cancel.");
+                throw new ArgumentException("Expected apply-live, normalize-after-boot, recover, or cancel.");
             }
 
+            var progressPipe = GetOption(args, "--progress");
+            var progress = progressPipe is null ? null : new NamedPipeTransitionProgressReporter(progressPipe);
             var orchestrator = new ModeOrchestrator(new JsonStateStore(),
-                new WindowsSystemController(new CommandRunner()), message => WriteLog(logPath, message));
+                new WindowsSystemController(new CommandRunner()), message => WriteLog(logPath, message), progress);
             switch (args[0].ToLowerInvariant())
             {
-                case "arm" when args.Length >= 2 && Enum.TryParse<MachineMode>(args[1], true, out var mode):
-                    var helperPath = Environment.ProcessPath ?? throw new InvalidOperationException("Helper path is unavailable.");
-                    var armed = await orchestrator.ArmAsync(mode, helperPath);
-                    EnsureHealthy(armed);
-                    WriteLog(logPath, $"Armed {mode} transition.");
-                    if (args.Contains("--reboot", StringComparer.OrdinalIgnoreCase))
-                    {
-                        Restart($"KCxWare is restarting Windows into {mode} mode.");
-                    }
+                case "apply-live" when args.Length >= 2 && Enum.TryParse<MachineMode>(args[1], true, out var mode):
+                    var appliedLive = await orchestrator.ApplyLiveAsync(mode);
+                    EnsureHealthy(appliedLive);
+                    WriteLog(logPath, $"Applied {mode} mode live.");
                     break;
 
                 case "apply-armed":
-                    var applied = await orchestrator.ApplyArmedAsync();
-                    EnsureHealthy(applied);
-                    WriteLog(logPath, $"Applied {applied.CurrentMode} mode.");
+                case "normalize-after-boot":
+                    var normalized = await orchestrator.NormalizeAfterBootAsync();
+                    EnsureHealthy(normalized);
+                    WriteLog(logPath, "Normalized temporary session mode after boot.");
                     break;
 
                 case "recover":
@@ -101,5 +100,11 @@ internal static class HelperProgram
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.AppendAllText(path, $"{DateTimeOffset.UtcNow:O} {message}{Environment.NewLine}");
+    }
+
+    private static string? GetOption(string[] args, string name)
+    {
+        var index = Array.IndexOf(args, name);
+        return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
     }
 }

@@ -26,7 +26,7 @@ public static class ModePolicy
     [
         "com.docker.service", "WslService", "LxssManager", "vmcompute", "OllamaService",
         "CoworkVMService", "RustDesk", "WSearch", "DoSvc", "MacriumService", "SaladBowl", "FvSvc",
-        "SignalRgb.Service", "WinFsp.Launcher"
+        "SignalRgb.Service", "WinFsp.Launcher", "SamsungUpdateService"
     ];
 
     public static IReadOnlyList<string> GamingSuppressibleProcesses { get; } =

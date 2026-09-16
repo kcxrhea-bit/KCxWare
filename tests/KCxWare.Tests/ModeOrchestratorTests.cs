@@ -526,6 +526,68 @@ public sealed class ModeOrchestratorTests
         Assert.Equal(1, system.TaskDeleteCount);
     }
 
+    [Fact]
+    public async Task LiveModes_CommitWithoutArmingOrReboot()
+    {
+        var store = new MemoryStateStore();
+        var system = SystemWithPlans();
+        var orchestrator = new ModeOrchestrator(store, system);
+
+        var gaming = await orchestrator.ApplyLiveAsync(MachineMode.Gaming);
+        Assert.Equal(MachineMode.Gaming, gaming.CurrentMode);
+        Assert.False(gaming.RebootRequired);
+        Assert.False(system.TaskPresent);
+
+        var programming = await orchestrator.ApplyLiveAsync(MachineMode.Programming);
+        Assert.Equal(MachineMode.Programming, programming.CurrentMode);
+        Assert.False(programming.RebootRequired);
+
+        var normal = await orchestrator.ApplyLiveAsync(MachineMode.Normal);
+        Assert.Equal(MachineMode.Normal, normal.CurrentMode);
+        Assert.False(normal.RebootRequired);
+    }
+
+    [Fact]
+    public async Task NewSession_NormalizesTemporaryModeToNormal()
+    {
+        var initial = new ModeState
+        {
+            CurrentMode = MachineMode.Gaming,
+            DesiredMode = MachineMode.Gaming,
+            SessionId = "old-session",
+            PreviousPowerPlan = "baseline",
+            ChangedServices = [new ServiceSnapshot("WSearch", true)]
+        };
+        var store = new MemoryStateStore(initial);
+        var system = SystemWithPlans();
+        system.CurrentSessionId = "new-session";
+        system.Services["WSearch"] = false;
+        system.Plans.Add("baseline");
+
+        var result = await new ModeOrchestrator(store, system).NormalizeAfterBootAsync();
+
+        Assert.Equal(MachineMode.Normal, result.CurrentMode);
+        Assert.Contains("WSearch", system.StartedServices);
+        Assert.Equal("baseline", system.ActivePlan);
+    }
+
+    [Theory]
+    [InlineData(MachineMode.Gaming)]
+    [InlineData(MachineMode.Programming)]
+    [InlineData(MachineMode.Normal)]
+    public async Task LiveTransition_ReportsEveryPreCompletionMilestone(MachineMode target)
+    {
+        var progress = new RecordingProgress();
+        var system = SystemWithPlans();
+        var result = await new ModeOrchestrator(new MemoryStateStore(), system, progress: progress)
+            .ApplyLiveAsync(target);
+
+        Assert.Equal(target, result.CurrentMode);
+        Assert.Equal([0, 20, 40, 60, 80], progress.Events.Select(item => item.Percent).Distinct().ToArray());
+        Assert.True(progress.Events.All(item => item.Percent is >= 0 and <= 100));
+        Assert.True(progress.Events.Zip(progress.Events.Skip(1), (left, right) => left.Percent <= right.Percent).All(value => value));
+    }
+
     private static FakeSystem SystemWithPlans()
     {
         var system = new FakeSystem();

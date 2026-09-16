@@ -12,7 +12,7 @@ public sealed record TransitionRecord(
 
 public sealed record ModeState
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
     public MachineMode CurrentMode { get; init; } = MachineMode.Normal;
@@ -22,6 +22,7 @@ public sealed record ModeState
     public DateTimeOffset? LastSuccessfulTransitionUtc { get; init; }
     public TransitionRecord? Transaction { get; init; }
     public string? LastError { get; init; }
+    public string? SessionId { get; init; }
 
     public bool RebootRequired => CurrentMode is MachineMode.GamingArmed
         or MachineMode.ProgrammingArmed or MachineMode.NormalArmed;
