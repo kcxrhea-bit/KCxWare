@@ -7,10 +7,13 @@ using KCxWare.Core.Policies;
 namespace KCxWare.Core.Windows;
 
 public sealed partial class WindowsSystemController(ICommandRunner runner,
-    IServiceRecoveryPolicyStore? recoveryPolicyStore = null) : ISystemController
+    IServiceRecoveryPolicyStore? recoveryPolicyStore = null,
+    IServiceStatusReader? serviceStatusReader = null) : ISystemController
 {
     private readonly IServiceRecoveryPolicyStore _recoveryPolicyStore =
         recoveryPolicyStore ?? new ServiceRecoveryPolicyStore();
+    private readonly IServiceStatusReader _serviceStatusReader =
+        serviceStatusReader ?? new WindowsServiceStatusReader();
 
     public Task<ServiceFailureActionsConfig> GetServiceFailureActionsAsync(string name,
         CancellationToken cancellationToken = default) =>
@@ -131,14 +134,8 @@ public sealed partial class WindowsSystemController(ICommandRunner runner,
 
     public async Task<bool?> IsServiceRunningAsync(string name, CancellationToken cancellationToken = default)
     {
-        var result = await runner.RunAsync("sc.exe", ["query", name], cancellationToken);
-        if (result.ExitCode == 1060 || result.StandardOutput.Contains("1060", StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        EnsureSuccess(result, $"query service {name}");
-        return !result.StandardOutput.Contains("STOPPED", StringComparison.OrdinalIgnoreCase);
+        var currentState = await _serviceStatusReader.QueryCurrentStateAsync(name, cancellationToken);
+        return currentState is null ? null : currentState.Value != 0x00000001;
     }
 
     public async Task<bool> CanStopServiceSafelyAsync(string name, CancellationToken cancellationToken = default)
@@ -283,11 +280,13 @@ public sealed partial class WindowsSystemController(ICommandRunner runner,
 
     public async Task DeleteOneShotTaskAsync(CancellationToken cancellationToken = default)
     {
-        var result = await runner.RunAsync("schtasks.exe", ["/Delete", "/F", "/TN", ModePolicy.TransitionTaskName], cancellationToken);
-        if (result.ExitCode != 0 && !result.StandardError.Contains("cannot find", StringComparison.OrdinalIgnoreCase))
+        if (!await IsOneShotTaskPresentAsync(cancellationToken))
         {
-            EnsureSuccess(result, "delete one-shot transition task");
+            return;
         }
+
+        var result = await runner.RunAsync("schtasks.exe", ["/Delete", "/F", "/TN", ModePolicy.TransitionTaskName], cancellationToken);
+        EnsureSuccess(result, "delete one-shot transition task");
     }
 
     private static void EnsureNotProtected(string name)

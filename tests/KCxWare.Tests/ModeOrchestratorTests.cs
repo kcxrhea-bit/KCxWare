@@ -772,18 +772,15 @@ public sealed class ModeOrchestratorTests
     [Fact]
     public async Task ServiceStop_WaitsThroughStopPendingUntilStopped()
     {
-        var runner = new SequencedRunner(
-            new CommandResult(0, "STATE : 3 STOP_PENDING", string.Empty),
-            new CommandResult(0, "STATE : 3 STOP_PENDING", string.Empty),
-            new CommandResult(0, "STATE : 1 STOPPED", string.Empty));
-        var controller = new WindowsSystemController(runner);
+        var runner = new SequencedRunner(new CommandResult(0, string.Empty, string.Empty));
+        var statusReader = new SequencedServiceStatusReader(3, 3, 1);
+        var controller = new WindowsSystemController(runner, serviceStatusReader: statusReader);
 
         await controller.StopServiceAsync("SaladBowl");
 
-        Assert.Equal(3, runner.Calls.Count);
+        Assert.Single(runner.Calls);
         Assert.Equal(["stop", "SaladBowl"], runner.Calls[0].Arguments);
-        Assert.Equal(["query", "SaladBowl"], runner.Calls[1].Arguments);
-        Assert.Equal(["query", "SaladBowl"], runner.Calls[2].Arguments);
+        Assert.Equal(3, statusReader.Calls);
     }
 
     [Fact]
