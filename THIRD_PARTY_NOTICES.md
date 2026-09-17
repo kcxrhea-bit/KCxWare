@@ -1,33 +1,44 @@
 # Third-Party Notices
 
-KCxWare is an independent personal software project.
+KCxWare is an independent project. It is not affiliated with, sponsored by,
+or endorsed by any of the third parties named below. This notice covers the
+creative assets shipped with the application and the third-party product
+names KCxWare mentions for compatibility purposes.
 
-## Third-Party Characters and Artwork
+## KCxWare creative assets
 
-Certain visual elements used by KCxWare may depict, reference, or be inspired by
-third-party characters, artwork, logos, trademarks, or other intellectual property.
+The application contains KCxWare-specific creative assets under `assets/`:
 
-All such third-party characters, artwork, names, trademarks, logos, and related
-intellectual property remain the property of their respective owners.
+- **`assets/1.png`** was generated using OpenAI/ChatGPT image generation at
+  the project owner's direction.
+- **`assets/KCxWare.ico`** derives from KCxWare artwork generated using
+  OpenAI/ChatGPT.
+- **`assets/kcxparade.mp4`** was produced using Fotor from KCxWare artwork
+  generated using OpenAI/ChatGPT.
 
-Their inclusion in KCxWare does not imply sponsorship, endorsement, affiliation,
-or authorization by the respective rights holders.
+OpenAI and Fotor are not sponsors of, do not endorse, and are not affiliated
+with KCxWare. Their names are used here solely to describe how these assets
+were produced.
 
-No ownership of third-party intellectual property is claimed.
+These notices describe provenance only. They are not a representation or
+warranty about the commercial redistribution rights available for
+AI-generated or AI-tool-processed content; anyone redistributing KCxWare or
+its assets should independently confirm the current terms of service of the
+tools used (OpenAI and Fotor) for their intended use.
 
-## Third-Party Character Designs
+## Third-party product and company names
 
-Any recognizable third-party character designs, game characters, sprites,
-mascots, or related artwork remain the intellectual property of their respective
-owners.
+KCxWare mentions certain third-party product and company names (including,
+without limitation, NVIDIA, AMD, Git, Docker, WSL, Visual Studio, and
+similar names) solely for factual purposes, such as identifying optional
+hardware or software the application can detect or interoperate with. Use
+of these names is for compatibility and interoperability identification
+only. All such trademarks remain the property of their respective owners,
+and mentioning them does not imply sponsorship, endorsement, or affiliation
+with KCxWare.
 
-KCxWare does not claim ownership of those characters or their original designs.
+## KCxWare source code
 
-## KCxWare
-
-KCxWare's original source code, application logic, interface design, and
-KCxWare-specific original materials are separate from any third-party
-intellectual property referenced or displayed by the project.
-
-This notice is provided to identify third-party ownership and clarify that
-KCxWare makes no claim of ownership over such third-party intellectual property.
+KCxWare's original source code, application logic, and interface design are
+covered by the license in `LICENSE` and are separate from the third-party
+items described in this notice.

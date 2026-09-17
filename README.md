@@ -1,57 +1,211 @@
 # KCxWare
 
-KCxWare is a lightweight native Windows 11 WPF control panel for switching one PC between Gaming, Programming, and Normal Everyday modes. Its black, cyan, and magenta interface uses the supplied `assets/1.png` background and the exact `assets/KCxWare.ico` application branding.
+KCxWare is a Windows 11 desktop utility for switching a PC between **Gaming Mode**, **Programming Mode**, and **Normal Mode**.
 
-## Safety model
+It is designed around temporary, reversible session changes rather than permanent Windows tuning.
 
-The WPF interface runs without administrator rights. After a clear confirmation, it starts `KCxWare.Helper.exe` through Windows UAC and applies the selected mode in the current session. The helper records a transaction under `C:\ProgramData\KCxWare`, verifies the result, and refreshes the UI from authoritative state. Gaming and Programming are temporary session modes; a new Windows boot restores the recorded baseline and returns KCxWare to Normal. Legacy `KCxWare Apply Armed Mode` invocations are normalized safely and never reapply an armed Gaming or Programming mode.
+## Safety and reversibility
 
-Gaming suppression is allowlisted and session-oriented: service startup types are never disabled. Defender, Firewall, RPC, networking, Wi-Fi, audio, NVIDIA display and recording components, Chrome, Logitech input, Gaming Services, GameInput, Easy Anti-Cheat, and BattlEye are explicitly protected. Unknown and missing services or processes, including unlisted Chrome native hosts, are not modified. KCxWare never changes Fortnite files, tampers with anti-cheat, overclocks hardware, or applies undocumented registry tweaks.
+The main WPF application runs without administrator rights.
 
-## Modes
+When a privileged operation is required, KCxWare launches `KCxWare.Helper.exe` through Windows UAC. The helper captures the relevant baseline state before making changes, applies the requested mode, verifies the result, and records transactional state under:
 
-- **Gaming Mode** applies immediately in the current session with no fixed startup-settle delay. Before mutation, KCxWare performs a read-only capability and power-plan preflight, then safely shuts down WSL only when it is available and stops only running allowlisted services/processes. Services must reach a confirmed `STOPPED` state before their remaining processes are terminated. A 35-second continuously clean verification window remains required for success; this covers WSearch's observed delayed restart action, and a late restart triggers another cleanup attempt within the existing three-attempt limit. KCxWare selects the first installed Gaming candidate (the existing KCx/Ryzen plan, then Windows High Performance) and preserves the active plan if neither exists. NVIDIA, AMD, and Intel graphics are supported without vendor-specific driver mutation. Chrome, graphics drivers, NVIDIA App/GeForce Experience Overlay, recording/Highlights, security, networking, audio, input, Gaming Services, and anti-cheat remain protected. OpenRGB and RustDesk remain required cleanup targets. Windows-managed PhoneExperienceHost, CrossDeviceService, and CrossDeviceResume are logged best-effort targets; Windows DCOM-owned WidgetService is excluded from failure verification. A residual `wslservice` host process is benign only when WSLService, vmcompute, and `vmmemWSL` are stopped.
-- **Programming Mode** restores services that KCxWare recorded as running before Gaming, detects common installed development capabilities (Git/Git Bash, Node/npm, WSL, Docker, Ollama/local-AI, .NET, Visual Studio, and VS Code), and chooses the first supported installed performance/development power plan. Detection is informational and does not launch IDEs, terminals, containers, Node processes, or AI models.
-- **Normal Mode** restores only services captured as running before Gaming Mode and restores the captured pre-Gaming power plan when it is still installed, otherwise preferring AMD Ryzen Balanced (`9897998c-92de-4669-853f-b7cd3ecb2790`) then Windows Balanced (`381b4222-f694-41f0-9685-ff5bb260df2e`). KCxWare intentionally does not relaunch arbitrary applications it closed because it cannot safely reconstruct their command lines or session state.
+`C:\ProgramData\KCxWare`
 
-Optional software, services, tools, GPU vendors, and supported power-plan candidates may be absent; absence is a normal supported configuration. Capability results are ephemeral and logged for the transition rather than persisted as a hardware/software inventory. A transition fails before mutation when KCxWare cannot capture the active power plan needed for a safely reversible baseline.
+Gaming and Programming modes are temporary session modes. Returning to Normal Mode restores the captured baseline where safe. A new Windows boot also normalizes the session back to Normal rather than permanently reapplying Gaming or Programming settings.
 
-The in-app **Offline Guide** documents setup, defaults, permissions, risks, failures, recovery, examples, and related status features without requiring a network connection.
+KCxWare uses allowlisted behavior rather than blanket system disabling.
+
+It does not intentionally disable or interfere with:
+
+- Microsoft Defender
+- Windows Firewall
+- core RPC or networking services
+- Wi-Fi
+- audio
+- NVIDIA display components
+- NVIDIA Overlay / Highlights
+- Chrome
+- Logitech input software
+- Gaming Services
+- GameInput
+- Easy Anti-Cheat
+- BattlEye
+
+KCxWare does not modify game files, tamper with anti-cheat, overclock hardware, or apply undocumented performance registry tweaks.
+
+## Gaming Mode
+
+Gaming Mode applies temporary cleanup and prioritization in the current Windows session.
+
+Depending on what is actually installed and running, KCxWare can:
+
+- select an appropriate installed performance-oriented power plan
+- stop allowlisted background services and processes
+- shut down WSL when WSL is detected and active
+- suppress Windows Search for the Gaming session using reversible service configuration handling
+- verify cleanup results before declaring the transition successful
+
+Gaming Mode uses sustained verification rather than assuming a process or service stayed stopped after a single check.
+
+Some Windows-managed components can legitimately respawn through Windows infrastructure. KCxWare treats appropriate shell/DCOM-managed components as best-effort targets instead of disabling Windows infrastructure to keep them stopped.
+
+KCxWare does not guarantee a particular FPS increase or performance improvement. Results depend on the PC, installed software, workload, game, drivers, and existing system configuration.
+
+## Programming Mode
+
+Programming Mode prepares the session for development-oriented use without blindly launching heavy applications.
+
+KCxWare detects supported development capabilities that are actually available and adapts accordingly.
+
+Examples of detected capabilities include:
+
+- Git / Git Bash
+- Node.js / npm
+- WSL
+- Docker
+- Ollama and supported local-AI tooling
+- .NET SDK
+- Visual Studio
+- Visual Studio Code
+
+Programming Mode does not require all of these tools to be installed.
+
+## Normal Mode
+
+Normal Mode restores the original baseline captured before temporary mode changes.
+
+Where safe and applicable, KCxWare restores:
+
+- previously running services
+- temporary service configuration changes
+- the original power plan
+
+KCxWare intentionally does not attempt to reconstruct and relaunch arbitrary applications that were closed, because their original command lines, documents, arguments, and application state cannot always be restored safely.
+
+## Hardware and software awareness
+
+KCxWare detects supported capabilities instead of assuming every PC has the same hardware or software.
+
+Current capability awareness includes supported detection for:
+
+- NVIDIA graphics
+- AMD graphics
+- Intel graphics
+- Git / Git Bash
+- Node.js / npm
+- WSL
+- Docker
+- Ollama / supported local-AI tooling
+- .NET SDK
+- Visual Studio
+- Visual Studio Code
+- installed Windows and vendor power plans
+
+Optional hardware and software may be absent. KCxWare adapts to capabilities that are actually available.
+
+KCxWare is intended for normal supported Windows 11 gaming and development PCs. It does not claim identical behavior on every possible Windows configuration.
+
+## Recovery
+
+State changes are handled transactionally.
+
+If a transition is interrupted or cannot be completed safely, KCxWare can enter `RecoveryRequired` rather than pretending the requested mode succeeded.
+
+Use **Run Safe Recovery** to restore the recorded baseline where possible.
+
+KCxWare persists recovery/state information under:
+
+`C:\ProgramData\KCxWare`
+
+## Requirements
+
+### Running KCxWare
+
+- Windows 11 x64
+- .NET 8 Windows Desktop Runtime
+- administrator approval through UAC when KCxWare performs privileged operations
+
+The current release is framework-dependent.
+
+### Building from source
+
+- Windows 11 x64
+- .NET 8 SDK
+- Git, if cloning the repository
 
 ## Build and test
 
-Requirements: Windows 11 x64 and .NET 8 SDK.
-
 ```powershell
 dotnet restore .\KCxWare.sln
-dotnet build .\KCxWare.sln -c Release
-dotnet test .\KCxWare.sln -c Release --no-build
+dotnet build .\KCxWare.sln --configuration Release
+dotnet test .\KCxWare.sln
 ```
 
-Create the Release x64 folder:
+## Publish
+
+Create the framework-dependent Windows x64 release:
 
 ```powershell
 .\scripts\Publish.ps1
 ```
 
-Framework-dependent x64 publishing was selected because this target PC already has the .NET 8 Windows Desktop runtime and the result is substantially smaller than a self-contained bundle. The current machine's NuGet configuration exposes only Visual Studio offline packages, so the self-contained Windows runtime packs are unavailable without changing package-source policy. Build output and `publish/` are intentionally ignored by Git.
+The publish script verifies the required application files, creative assets, license, and third-party notices.
 
-## Install and uninstall
+Published output is written under:
 
-From an elevated PowerShell window after publishing:
+`publish\win-x64`
+
+Build and publish output are intentionally excluded from Git.
+
+## Install
+
+After publishing, open an elevated PowerShell window and run:
 
 ```powershell
 .\installer\Install-KCxWare.ps1
 ```
 
-This installs under `%ProgramFiles%\KCxWare` and creates all-users Desktop and Start Menu shortcuts whose icon comes from the embedded `KCxWare.ico`. Uninstall with `installer\Uninstall-KCxWare.ps1`. The uninstaller removes the one-shot task, application files, and shortcuts, but intentionally preserves `C:\ProgramData\KCxWare` recovery evidence.
+KCxWare installs under:
 
-## Recovery
+`C:\Program Files\KCxWare`
 
-State writes use a temporary file, write-through flush, atomic replacement, and a backup. An incomplete transaction loads as `RecoveryRequired`. Open KCxWare and choose **Run Safe Recovery** to restart services recorded as previously running, restore the previous installed power plan when possible, and remove the one-shot task. Choose **Cancel Armed Transition** before reboot to remove an armed task.
+The installer creates the intended Windows shortcuts and verifies that required application files and release notices are present.
 
-Logs: `C:\ProgramData\KCxWare\logs\helper.log`. State: `C:\ProgramData\KCxWare\state.json`. Neither contains secrets.
+## Uninstall
 
-## Validation boundary
+From an elevated PowerShell window:
 
-Automated tests cover transitions, interruption recovery, idempotency, missing services, protected-service policy, power-plan fallback, and stale-task cleanup. Build and launch validation do not by themselves prove a physical reboot/profile transition; privileged live acceptance should be performed deliberately after saving all work.
+```powershell
+.\installer\Uninstall-KCxWare.ps1
+```
+
+The uninstaller removes the application and its shortcuts while preserving recovery evidence under `C:\ProgramData\KCxWare`.
+
+## Logs and state
+
+Helper log:
+
+`C:\ProgramData\KCxWare\logs\helper.log`
+
+State:
+
+`C:\ProgramData\KCxWare\state.json`
+
+## Third-party compatibility and assets
+
+KCxWare may detect or interoperate with third-party hardware and software. Those products are not bundled with KCxWare merely because support or detection exists.
+
+Third-party product, company, and trademark names are used for factual compatibility and interoperability identification. Their respective trademarks remain the property of their owners.
+
+Compatibility references do not imply sponsorship, endorsement, or affiliation.
+
+Creative-asset provenance and additional third-party information are documented in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
+## License
+
+KCxWare source code is licensed under the MIT License.
+
+See [`LICENSE`](LICENSE).
+
+Creative assets and third-party materials are documented separately in `THIRD_PARTY_NOTICES.md`.
