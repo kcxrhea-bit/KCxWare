@@ -8,6 +8,7 @@ using KCxWare.Core.Models;
 using KCxWare.Core.Orchestration;
 using KCxWare.Core.Persistence;
 using KCxWare.Core.Windows;
+using KCxWare.Core.Companion;
 
 namespace KCxWare.ViewModels;
 
@@ -19,6 +20,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string _activePowerPlan = "Detecting…";
     private string _health = "CHECKING";
     private bool _isBusy;
+    public PingMonitorCompanion PingMonitor { get; } = new();
+    public string PingMonitorStatus => PingMonitor.Status;
+    public bool StartPingMonitorWithGamingMode { get => PingMonitor.StartWithGamingMode; set { PingMonitor.SetPreferences(value, StopPingMonitorWhenGamingModeEnds); OnPropertyChanged(); } }
+    public bool StopPingMonitorWhenGamingModeEnds { get => PingMonitor.StopWhenGamingModeEnds; set { PingMonitor.SetPreferences(StartPingMonitorWithGamingMode, value); OnPropertyChanged(); } }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -97,6 +102,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
 
     public void StartElevated(string command) => StartElevatedProcess(command).Dispose();
+
+    public void RefreshPingMonitorStatus() => OnPropertyChanged(nameof(PingMonitorStatus));
 
     private static Process StartElevatedProcess(string command)
     {

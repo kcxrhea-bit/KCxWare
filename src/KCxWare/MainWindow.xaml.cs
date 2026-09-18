@@ -22,12 +22,15 @@ public partial class MainWindow
     // Manual CHAOS sayings: a separate shuffle-bag instance/collection from the automatic
     // CompletionMessages flavor text, advanced only on an explicit CHAOS button press.
     private readonly ShuffleBag<string> _chaosBag;
+    private readonly DispatcherTimer _pingMonitorStatusTimer = new() { Interval = TimeSpan.FromSeconds(2) };
 
     public MainWindow()
     {
         InitializeComponent();
         _chaosBag = ChaosMessages.CreateShuffleBag(_random);
         DataContext = _viewModel;
+        _pingMonitorStatusTimer.Tick += (_, _) => _viewModel.RefreshPingMonitorStatus();
+        _pingMonitorStatusTimer.Start();
         LoadingHost.DataContext = new LoadingViewModel(_viewModel.LoadingCoordinator);
         Loaded += async (_, _) =>
         {
@@ -43,6 +46,12 @@ public partial class MainWindow
     private async void GamingClick(object sender, RoutedEventArgs e) => await ConfirmAndApplyAsync(MachineMode.Gaming);
     private async void ProgrammingClick(object sender, RoutedEventArgs e) => await ConfirmAndApplyAsync(MachineMode.Programming);
     private async void NormalClick(object sender, RoutedEventArgs e) => await ConfirmAndApplyAsync(MachineMode.Normal);
+    private void OpenPingMonitorClick(object sender, RoutedEventArgs e)
+    {
+        if (!_viewModel.PingMonitor.Launch()) MessageBox.Show("KCxPingMonitor was not found. Install it beside KCxWare under Tools\\KCxPingMonitor or configure the companion package.", "KCxWare", MessageBoxButton.OK, MessageBoxImage.Information);
+        _viewModel.RefreshPingMonitorStatus();
+    }
+    private void OpenPingLogsClick(object sender, RoutedEventArgs e) => _viewModel.PingMonitor.OpenLogs();
 
     private async void RestartWindowsClick(object sender, RoutedEventArgs e) => await ConfirmAndExecutePowerActionAsync(PowerAction.Restart);
     private async void ShutdownWindowsClick(object sender, RoutedEventArgs e) => await ConfirmAndExecutePowerActionAsync(PowerAction.Shutdown);
@@ -87,6 +96,11 @@ public partial class MainWindow
                 // approved pool, shown as the operation's text-only completion screen.
                 var flavor = CompletionMessages.SelectModeMessage(mode, _random);
                 op.CompleteWithMessage(flavor.Title, flavor.Subtitle);
+                if (mode == MachineMode.Gaming && _viewModel.StartPingMonitorWithGamingMode)
+                    _viewModel.PingMonitor.Launch();
+                if (mode == MachineMode.Normal)
+                    _viewModel.PingMonitor.StopIfOwnedByGamingMode();
+                _viewModel.RefreshPingMonitorStatus();
             });
         if (!op.IsFailed) await _viewModel.RefreshAsync();
     }
@@ -117,9 +131,9 @@ public partial class MainWindow
             var exitCode = await _viewModel.RunElevatedAsync("recover");
             if (exitCode != 0)
             {
-                op.Fail($"Recovery helper exited with code {exitCode}. See helper.log for details.");
-                MessageBox.Show(op.ErrorMessage, "KCxWare", MessageBoxButton.OK, MessageBoxImage.Error);
                 await _viewModel.RefreshAsync();
+                op.Fail(FormatHelperFailure("Recovery", exitCode));
+                MessageBox.Show(op.ErrorMessage, "KCxWare", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
 
@@ -149,7 +163,8 @@ public partial class MainWindow
             var exitCode = await _viewModel.RunElevatedAsync(command);
             if (exitCode != 0)
             {
-                op.Fail($"KCxWare.Helper exited with code {exitCode}. See helper.log for details.");
+                await _viewModel.RefreshAsync();
+                op.Fail(FormatHelperFailure("KCxWare.Helper", exitCode));
                 MessageBox.Show(op.ErrorMessage, "KCxWare", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
@@ -163,6 +178,15 @@ public partial class MainWindow
             op.Fail(exception.Message);
             MessageBox.Show(exception.Message, "KCxWare", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    private string FormatHelperFailure(string operation, int exitCode)
+    {
+        const string defaultError = "No recovery issue detected.";
+        var detail = _viewModel.ErrorDetail;
+        return detail is not null && !string.IsNullOrWhiteSpace(detail) && !string.Equals(detail, defaultError, StringComparison.Ordinal)
+            ? $"{operation} failed (helper exit code {exitCode}): {detail}"
+            : $"{operation} failed (helper exit code {exitCode}). See C:\\ProgramData\\KCxWare\\logs\\helper.log for details.";
     }
 
     private ProgressServer StartProgressServer(LoadingHandle operation)

@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$OutputPath = (Join-Path $PSScriptRoot '..\publish\win-x64')
+    [string]$OutputPath = (Join-Path $PSScriptRoot '..\publish\win-x64'),
+    [string]$PingMonitorProjectPath = (Join-Path $PSScriptRoot '..\..\KCxPingMonitor\KCxPingMonitor.csproj')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,6 +17,15 @@ if ($LASTEXITCODE -ne 0) { throw 'KCxWare publish failed.' }
 dotnet publish (Join-Path $resolvedRoot 'src\KCxWare.Helper\KCxWare.Helper.csproj') -c Release -r win-x64 --self-contained false --no-restore -o $publishPath
 if ($LASTEXITCODE -ne 0) { throw 'KCxWare.Helper publish failed.' }
 
+if (Test-Path -LiteralPath $PingMonitorProjectPath) {
+    $companionPath = Join-Path $publishPath 'Tools\KCxPingMonitor'
+    New-Item -ItemType Directory -Force -Path $companionPath | Out-Null
+    dotnet publish $PingMonitorProjectPath -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o $companionPath
+    if ($LASTEXITCODE -ne 0) { throw 'KCxPingMonitor companion publish failed.' }
+} else {
+    Write-Warning "KCxPingMonitor project was not found at $PingMonitorProjectPath; publishing KCxWare without the optional companion."
+}
+
 Copy-Item -LiteralPath (Join-Path $resolvedRoot 'LICENSE') -Destination $publishPath -Force
 Copy-Item -LiteralPath (Join-Path $resolvedRoot 'THIRD_PARTY_NOTICES.md') -Destination $publishPath -Force
 
@@ -24,6 +34,9 @@ foreach ($relativePath in $required) {
     if (-not (Test-Path -LiteralPath (Join-Path $publishPath $relativePath))) {
         throw "Published artifact is missing $relativePath."
     }
+}
+if (Test-Path -LiteralPath (Join-Path $publishPath 'Tools\KCxPingMonitor\KCxPingMonitor.exe')) {
+    Write-Output 'Verified packaged KCxPingMonitor companion.'
 }
 
 Write-Output "Published KCxWare to $publishPath"
