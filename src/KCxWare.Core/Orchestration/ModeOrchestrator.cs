@@ -315,6 +315,7 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
 
         var safetySkippedServices = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         IReadOnlyList<string> survivingServices = [];
+        IReadOnlyList<string> bestEffortSurvivingServices = [];
         IReadOnlyList<string> survivingProcesses = [];
         IReadOnlyList<string> bestEffortSurvivingProcesses = [];
 
@@ -380,10 +381,12 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
 
             await system.DelayAsync(ModePolicy.GamingVerificationRetryDelay, cancellationToken);
             survivingServices = await FindSurvivingServicesAsync(safetySkippedServices, cancellationToken);
+            bestEffortSurvivingServices = await FindBestEffortSurvivingServicesAsync(safetySkippedServices, cancellationToken);
             survivingProcesses = await FindSurvivingProcessesAsync(cancellationToken);
             bestEffortSurvivingProcesses = await FindBestEffortSurvivingProcessesAsync(cancellationToken);
             log?.Invoke($"Gaming cleanup verification {attempt}/{ModePolicy.GamingCleanupAttempts}: " +
                 $"surviving services={FormatNames(survivingServices)}; " +
+                $"best-effort surviving services={FormatNames(bestEffortSurvivingServices)}; " +
                 $"surviving processes={FormatNames(survivingProcesses)}; " +
                 $"best-effort surviving processes={FormatNames(bestEffortSurvivingProcesses)}; " +
                 $"safety-skipped services={FormatNames(safetySkippedServices)}.");
@@ -392,10 +395,12 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
             {
                 await system.DelayAsync(ModePolicy.GamingCleanVerificationDelay, cancellationToken);
                 survivingServices = await FindSurvivingServicesAsync(safetySkippedServices, cancellationToken);
+                bestEffortSurvivingServices = await FindBestEffortSurvivingServicesAsync(safetySkippedServices, cancellationToken);
                 survivingProcesses = await FindSurvivingProcessesAsync(cancellationToken);
                 bestEffortSurvivingProcesses = await FindBestEffortSurvivingProcessesAsync(cancellationToken);
                 log?.Invoke($"Gaming cleanup sustained verification {attempt}/{ModePolicy.GamingCleanupAttempts}: " +
                     $"surviving services={FormatNames(survivingServices)}; " +
+                    $"best-effort surviving services={FormatNames(bestEffortSurvivingServices)}; " +
                     $"surviving processes={FormatNames(survivingProcesses)}; " +
                     $"best-effort surviving processes={FormatNames(bestEffortSurvivingProcesses)}.");
 
@@ -432,6 +437,11 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
         var surviving = new List<string>();
         foreach (var service in ModePolicy.GamingSuppressibleServices)
         {
+            if (ModePolicy.GamingBestEffortServices.Contains(service))
+            {
+                continue;
+            }
+
             if (!safetySkippedServices.Contains(service) &&
                 await system.IsServiceRunningAsync(service, cancellationToken) == true)
             {
@@ -481,6 +491,22 @@ public sealed class ModeOrchestrator(IStateStore stateStore, ISystemController s
             if (await system.IsProcessRunningAsync(process, cancellationToken: cancellationToken))
             {
                 surviving.Add(process);
+            }
+        }
+
+        return surviving;
+    }
+
+    private async Task<IReadOnlyList<string>> FindBestEffortSurvivingServicesAsync(
+        IReadOnlySet<string> safetySkippedServices, CancellationToken cancellationToken)
+    {
+        var surviving = new List<string>();
+        foreach (var service in ModePolicy.GamingBestEffortServices)
+        {
+            if (!safetySkippedServices.Contains(service) &&
+                await system.IsServiceRunningAsync(service, cancellationToken) == true)
+            {
+                surviving.Add(service);
             }
         }
 

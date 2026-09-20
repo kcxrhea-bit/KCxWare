@@ -347,20 +347,68 @@ public sealed class ModeOrchestratorTests
         Assert.True(system.FailureActionsConfigured["WSearch"].ActionsOnNonCrashFailures);
     }
 
-    [Fact]
-    public async Task GamingCleanup_RealWSearchSurvivorStillFailsVerification()
+    [Theory]
+    [InlineData("WSearch")]
+    [InlineData("DoSvc")]
+    [InlineData("FvSvc")]
+    public async Task GamingCleanup_WindowsManagedServiceRespawnIsLoggedBestEffort(string service)
     {
         var store = new MemoryStateStore(new ModeState());
         var system = SystemWithPlans();
-        system.Services["WSearch"] = true;
-        // Simulates a genuine survivor (service never actually reaches STOPPED), unrelated to SCM
-        // recovery-action suppression - the fix must not mask a real cleanup failure.
-        system.ServiceRestartsRemaining["WSearch"] = ModePolicy.GamingCleanupAttempts;
+        system.Services[service] = true;
+        system.ServiceRestartsRemaining[service] = ModePolicy.GamingCleanupAttempts;
+        var logs = new List<string>();
+
+        var result = await new ModeOrchestrator(store, system, logs.Add).ApplyLiveAsync(MachineMode.Gaming);
+
+        Assert.Equal(MachineMode.Gaming, result.CurrentMode);
+        Assert.True(result.Transaction?.Completed);
+        Assert.Contains(service, system.StoppedServices);
+        Assert.True(system.Services[service]);
+        Assert.Contains(logs, message => message.Contains("best-effort surviving services=") &&
+            message.Contains(service));
+    }
+
+    [Fact]
+    public async Task GamingCleanup_FvSvcEtwRestartToleratedThroughAllAttemptsAndSustainedWindow()
+    {
+        // FvSvc (NVIDIA FrameView SDK) is restarted by ETW session triggers within seconds of being
+        // stopped — no SCM recovery actions are involved, so RecoverySuppressedServices cannot help.
+        // KCxWare must still attempt the stop (for any window where the ETW sessions are not active)
+        // but must not enter RecoveryRequired if FvSvc survives every attempt and the sustained
+        // clean-window verification, because the restart mechanism is outside KCxWare's control.
+        var store = new MemoryStateStore(new ModeState());
+        var system = SystemWithPlans();
+        system.Services["FvSvc"] = true;
+        // Models the ETW-triggered restart: FvSvc comes back on every stop call and also during the
+        // 35-second sustained clean-window delay — matching the observed production failure pattern.
+        system.ServiceRestartsRemaining["FvSvc"] = ModePolicy.GamingCleanupAttempts;
+        system.ServiceCleanWindowRespawnsRemaining["FvSvc"] = ModePolicy.GamingCleanupAttempts;
+        var logs = new List<string>();
+
+        var result = await new ModeOrchestrator(store, system, logs.Add).ApplyLiveAsync(MachineMode.Gaming);
+
+        Assert.Equal(MachineMode.Gaming, result.CurrentMode);
+        Assert.True(result.Transaction?.Completed);
+        Assert.Null(result.LastError);
+        Assert.Contains("FvSvc", system.StoppedServices);  // stop was attempted
+        Assert.True(system.Services["FvSvc"]);              // ETW restarted it; still running
+        Assert.Contains(logs, message => message.Contains("best-effort surviving services=") &&
+            message.Contains("FvSvc"));
+    }
+
+    [Fact]
+    public async Task GamingCleanup_RequiredServiceSurvivorStillFailsVerification()
+    {
+        var store = new MemoryStateStore(new ModeState());
+        var system = SystemWithPlans();
+        system.Services["com.docker.service"] = true;
+        system.ServiceRestartsRemaining["com.docker.service"] = ModePolicy.GamingCleanupAttempts;
 
         var result = await new ModeOrchestrator(store, system).ApplyLiveAsync(MachineMode.Gaming);
 
         Assert.Equal(MachineMode.RecoveryRequired, result.CurrentMode);
-        Assert.Contains("WSearch", result.LastError);
+        Assert.Contains("com.docker.service", result.LastError);
     }
 
     [Fact]
@@ -727,6 +775,9 @@ public sealed class ModeOrchestratorTests
         Assert.DoesNotContain(ModePolicy.GamingSuppressibleServices, ModePolicy.ProtectedServices.Contains);
         Assert.DoesNotContain(ModePolicy.GamingSuppressibleProcesses, ModePolicy.ProtectedProcesses.Contains);
         Assert.DoesNotContain(ModePolicy.GamingBestEffortProcesses, ModePolicy.ProtectedProcesses.Contains);
+        Assert.DoesNotContain(ModePolicy.GamingBestEffortServices, service =>
+            !ModePolicy.GamingSuppressibleServices.Contains(service));
+        Assert.DoesNotContain(ModePolicy.GamingBestEffortServices, ModePolicy.ProtectedServices.Contains);
         Assert.DoesNotContain(ModePolicy.GamingSuppressibleBackgroundProcesses, ModePolicy.ProtectedProcesses.Contains);
         Assert.DoesNotContain(ModePolicy.GamingShutdownVerifiedProcesses, ModePolicy.ProtectedProcesses.Contains);
     }

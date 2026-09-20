@@ -35,6 +35,20 @@ public static class ModePolicy
         "SignalRgb.Service", "WinFsp.Launcher", "SamsungUpdateService"
     ];
 
+    /// <summary>
+    /// Services that KCxWare still attempts to stop, but whose survival does not, by itself,
+    /// invalidate Gaming Mode. Used for services that Windows or hardware drivers restart
+    /// independently of SCM recovery actions (e.g. via ETW session triggers) and that
+    /// KCxWare cannot suppress without modifying system telemetry configuration. Their
+    /// survival is logged for truthfulness but is not treated as a hard failure.
+    /// </summary>
+    public static IReadOnlyList<string> GamingBestEffortServices { get; } =
+        [
+            "WSearch",  // Windows Search: SCM recovery suppressed but Windows may re-enable it
+            "DoSvc",    // Delivery Optimisation: Windows-managed, may be reactivated by Windows
+            "FvSvc",    // NVIDIA FrameView SDK: restarted by ETW session triggers, no SCM recovery actions
+        ];
+
     public static IReadOnlyList<string> GamingSuppressibleProcesses { get; } =
     [
         "Kudu", "Docker Desktop", "com.docker.backend", "com.docker.build", "ollama", "ollama app", "LM Studio",
@@ -90,6 +104,20 @@ public static class ModePolicy
         if (recoveryNotSuppressible.Length != 0)
         {
             throw new InvalidOperationException($"Recovery-suppression policy references services outside the suppressible policy: {string.Join(", ", recoveryNotSuppressible)}");
+        }
+
+        var bestEffortNotSuppressible = GamingBestEffortServices
+            .Where(service => !GamingSuppressibleServices.Contains(service))
+            .ToArray();
+        if (bestEffortNotSuppressible.Length != 0)
+        {
+            throw new InvalidOperationException($"Best-effort service policy references services outside the suppressible policy: {string.Join(", ", bestEffortNotSuppressible)}");
+        }
+
+        var bestEffortProtected = GamingBestEffortServices.Where(ProtectedServices.Contains).ToArray();
+        if (bestEffortProtected.Length != 0)
+        {
+            throw new InvalidOperationException($"Protected services appear in the best-effort policy: {string.Join(", ", bestEffortProtected)}");
         }
 
         var processOverlap = GamingSuppressibleProcesses
